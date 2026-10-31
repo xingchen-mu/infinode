@@ -592,6 +592,7 @@ function WorkflowEditor({ draft, id }: { draft: WorkflowDraft; id?: string }) {
 // ------------------------------------------------------------------ template gallery
 
 const CATEGORIES = ['全部', '图片生成', '图片编辑', '视频生成', '工具'];
+const CATEGORY_KEY = 'infinode:template-category';
 
 function PresetCard({ p }: { p: PresetInfo }) {
   const caps = useStore((s) => s.caps);
@@ -680,7 +681,15 @@ function PresetCard({ p }: { p: PresetInfo }) {
 function PresetsModal() {
   const presets = useStore((s) => s.presets);
   const caps = useStore((s) => s.caps);
-  const [cat, setCat] = useState('全部');
+  // Reopens on the category the user looked at last.
+  const [cat, setCat] = useState(() => {
+    const saved = localStorage.getItem(CATEGORY_KEY);
+    return saved && CATEGORIES.includes(saved) ? saved : '全部';
+  });
+  const pickCat = (c: string) => {
+    setCat(c);
+    localStorage.setItem(CATEGORY_KEY, c);
+  };
   const [onlyReady, setOnlyReady] = useState(false);
   useEffect(() => void loadWorkflows(), []);
   const isReady = (p: PresetInfo) => caps?.comfyOnline && !p.missing.nodes.length && !p.missing.models.length && !p.missing.notes.length;
@@ -702,7 +711,7 @@ function PresetsModal() {
       <div className="tpl-bar">
         <div className="seg">
           {CATEGORIES.map((c) => (
-            <button key={c} className={cat === c ? 'on' : ''} onClick={() => setCat(c)}>
+            <button key={c} className={cat === c ? 'on' : ''} onClick={() => pickCat(c)}>
               {c}
             </button>
           ))}
