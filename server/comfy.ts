@@ -163,6 +163,17 @@ export class ComfyClient {
       const wsUrl = this.url(`/ws?clientId=${this.clientId}`).replace(/^http/, 'ws');
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
+      let ended = false;
+      // Once per socket, on error or close: Node 22 fires only error when the connection is refused.
+      const retry = () => {
+        if (ended) return;
+        ended = true;
+        if (this.online) onStatus(false);
+        this.online = false;
+        if (this.closed) return;
+        this.wsTimer = setTimeout(open, delay);
+        delay = Math.min(delay * 2, 15_000);
+      };
       ws.onopen = () => {
         delay = 1000;
         this.online = true;
@@ -176,14 +187,12 @@ export class ComfyClient {
           /* ignore malformed */
         }
       };
-      ws.onclose = () => {
-        if (this.online) onStatus(false);
-        this.online = false;
-        if (this.closed) return;
-        this.wsTimer = setTimeout(open, delay);
-        delay = Math.min(delay * 2, 15_000);
+      ws.onclose = retry;
+      ws.onerror = () => {
+        retry();
+        // On Node 22, close() on a socket that never connected re-fires error and recurses.
+        if (ws.readyState === WebSocket.OPEN) ws.close();
       };
-      ws.onerror = () => ws.close();
     };
     open();
   }
