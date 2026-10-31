@@ -1,0 +1,251 @@
+{
+ "format": "comfy-canva/preset",
+ "version": 1,
+ "id": "flux2-dev-t2i",
+ "template": "image_flux2_text_to_image",
+ "name": "Flux.2 Dev 文生图",
+ "description": "Flux.2 Dev 高质量文生图（模型较大）",
+ "category": "图片生成",
+ "kind": "image",
+ "usage": 464,
+ "tags": [
+  "Image",
+  "Text to Image"
+ ],
+ "graph": {
+  "9": {
+   "inputs": {
+    "filename_prefix": "Flux2_dev",
+    "images": [
+     "98:8",
+     0
+    ]
+   },
+   "class_type": "SaveImage",
+   "_meta": {
+    "title": "保存图像"
+   }
+  },
+  "98:22": {
+   "inputs": {
+    "model": [
+     "98:12",
+     0
+    ],
+    "conditioning": [
+     "98:26",
+     0
+    ]
+   },
+   "class_type": "BasicGuider",
+   "_meta": {
+    "title": "基本引导器"
+   }
+  },
+  "98:26": {
+   "inputs": {
+    "guidance": 4,
+    "conditioning": [
+     "98:6",
+     0
+    ]
+   },
+   "class_type": "FluxGuidance",
+   "_meta": {
+    "title": "Flux引导"
+   }
+  },
+  "98:16": {
+   "inputs": {
+    "sampler_name": "euler"
+   },
+   "class_type": "KSamplerSelect",
+   "_meta": {
+    "title": "K采样器选择"
+   }
+  },
+  "98:10": {
+   "inputs": {
+    "vae_name": "full_encoder_small_decoder.safetensors"
+   },
+   "class_type": "VAELoader",
+   "_meta": {
+    "title": "加载VAE"
+   }
+  },
+  "98:13": {
+   "inputs": {
+    "noise": [
+     "98:25",
+     0
+    ],
+    "guider": [
+     "98:22",
+     0
+    ],
+    "sampler": [
+     "98:16",
+     0
+    ],
+    "sigmas": [
+     "98:48",
+     0
+    ],
+    "latent_image": [
+     "98:47",
+     0
+    ]
+   },
+   "class_type": "SamplerCustomAdvanced",
+   "_meta": {
+    "title": "自定义采样器（高级）"
+   }
+  },
+  "98:8": {
+   "inputs": {
+    "samples": [
+     "98:13",
+     0
+    ],
+    "vae": [
+     "98:10",
+     0
+    ]
+   },
+   "class_type": "VAEDecode",
+   "_meta": {
+    "title": "VAE解码"
+   }
+  },
+  "98:38": {
+   "inputs": {
+    "clip_name": "mistral_3_small_flux2_bf16.safetensors",
+    "type": "flux2",
+    "device": "default"
+   },
+   "class_type": "CLIPLoader",
+   "_meta": {
+    "title": "加载CLIP"
+   }
+  },
+  "98:48": {
+   "inputs": {
+    "steps": [
+     "98:100",
+     0
+    ],
+    "width": 1024,
+    "height": 1024
+   },
+   "class_type": "Flux2Scheduler",
+   "_meta": {
+    "title": "Flux2调度器"
+   }
+  },
+  "98:47": {
+   "inputs": {
+    "width": 1024,
+    "height": 1024,
+    "batch_size": 1
+   },
+   "class_type": "EmptyFlux2LatentImage",
+   "_meta": {
+    "title": "空Latent图像（Flux2）"
+   }
+  },
+  "98:25": {
+   "inputs": {
+    "noise_seed": 1027111520328378
+   },
+   "class_type": "RandomNoise",
+   "_meta": {
+    "title": "随机噪波"
+   }
+  },
+  "98:6": {
+   "inputs": {
+    "text": "high fashion, vintage couture, street photography, luxury fashion shoot, neo brutalist architecture, pastel paints",
+    "clip": [
+     "98:38",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Positive Prompt)"
+   }
+  },
+  "98:100": {
+   "inputs": {
+    "value": 20
+   },
+   "class_type": "PrimitiveInt",
+   "_meta": {
+    "title": "Steps"
+   }
+  },
+  "98:12": {
+   "inputs": {
+    "unet_name": "flux2_dev_fp8mixed.safetensors",
+    "weight_dtype": "default"
+   },
+   "class_type": "UNETLoader",
+   "_meta": {
+    "title": "UNet加载器"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "id": "prompt",
+   "type": "prompt",
+   "node": "98:6",
+   "field": "text",
+   "label": "提示词",
+   "default": "high fashion, vintage couture, street photography, luxury fashion shoot, neo brutalist architecture, pastel paints"
+  },
+  {
+   "id": "seed1",
+   "type": "seed",
+   "node": "98:25",
+   "field": "noise_seed",
+   "label": "种子"
+  },
+  {
+   "id": "width",
+   "type": "width",
+   "node": "98:47",
+   "field": "width",
+   "label": "宽",
+   "default": 1024
+  },
+  {
+   "id": "height",
+   "type": "height",
+   "node": "98:47",
+   "field": "height",
+   "label": "高",
+   "default": 1024
+  }
+ ],
+ "outputs": [
+  "9"
+ ],
+ "models": [
+  {
+   "name": "full_encoder_small_decoder.safetensors",
+   "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+   "directory": "vae"
+  },
+  {
+   "name": "mistral_3_small_flux2_bf16.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors",
+   "directory": "text_encoders"
+  },
+  {
+   "name": "flux2_dev_fp8mixed.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+   "directory": "diffusion_models"
+  }
+ ]
+}

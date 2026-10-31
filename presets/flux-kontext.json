@@ -1,0 +1,262 @@
+{
+ "format": "comfy-canva/preset",
+ "version": 1,
+ "id": "flux-kontext",
+ "template": "flux_kontext_dev_basic",
+ "name": "Flux.1 Kontext 图片编辑",
+ "description": "Flux.1 Kontext Dev 指令改图",
+ "category": "图片编辑",
+ "kind": "image",
+ "usage": 284,
+ "tags": [
+  "Image Edit"
+ ],
+ "graph": {
+  "136": {
+   "inputs": {
+    "filename_prefix": "flux.1_kontext_dev",
+    "images": [
+     "192:8",
+     0
+    ]
+   },
+   "class_type": "SaveImage",
+   "_meta": {
+    "title": "保存图像"
+   }
+  },
+  "190": {
+   "inputs": {
+    "image": "flux_kontext_dev_basic_input_image.jpg"
+   },
+   "class_type": "LoadImage",
+   "_meta": {
+    "title": "加载图像"
+   }
+  },
+  "192:39": {
+   "inputs": {
+    "vae_name": "ae.safetensors"
+   },
+   "class_type": "VAELoader",
+   "_meta": {
+    "title": "加载VAE"
+   }
+  },
+  "192:38": {
+   "inputs": {
+    "clip_name1": "clip_l.safetensors",
+    "clip_name2": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+    "type": "flux",
+    "device": "default"
+   },
+   "class_type": "DualCLIPLoader",
+   "_meta": {
+    "title": "双CLIP加载器"
+   }
+  },
+  "192:135": {
+   "inputs": {
+    "conditioning": [
+     "192:6",
+     0
+    ]
+   },
+   "class_type": "ConditioningZeroOut",
+   "_meta": {
+    "title": "条件零化"
+   }
+  },
+  "192:8": {
+   "inputs": {
+    "samples": [
+     "192:31",
+     0
+    ],
+    "vae": [
+     "192:39",
+     0
+    ]
+   },
+   "class_type": "VAEDecode",
+   "_meta": {
+    "title": "VAE解码"
+   }
+  },
+  "192:124": {
+   "inputs": {
+    "pixels": [
+     "192:42",
+     0
+    ],
+    "vae": [
+     "192:39",
+     0
+    ]
+   },
+   "class_type": "VAEEncode",
+   "_meta": {
+    "title": "VAE编码"
+   }
+  },
+  "192:35": {
+   "inputs": {
+    "guidance": 2.5,
+    "conditioning": [
+     "192:177",
+     0
+    ]
+   },
+   "class_type": "FluxGuidance",
+   "_meta": {
+    "title": "Flux引导"
+   }
+  },
+  "192:37": {
+   "inputs": {
+    "unet_name": "flux1-dev-kontext_fp8_scaled.safetensors",
+    "weight_dtype": "default"
+   },
+   "class_type": "UNETLoader",
+   "_meta": {
+    "title": "UNet加载器"
+   }
+  },
+  "192:177": {
+   "inputs": {
+    "conditioning": [
+     "192:6",
+     0
+    ],
+    "latent": [
+     "192:124",
+     0
+    ]
+   },
+   "class_type": "ReferenceLatent",
+   "_meta": {
+    "title": "参考Latent"
+   }
+  },
+  "192:146": {
+   "inputs": {
+    "direction": "right",
+    "match_image_size": true,
+    "spacing_width": 0,
+    "spacing_color": "white",
+    "image1": [
+     "190",
+     0
+    ]
+   },
+   "class_type": "ImageStitch",
+   "_meta": {
+    "title": "图像拼接"
+   }
+  },
+  "192:42": {
+   "inputs": {
+    "image": [
+     "192:146",
+     0
+    ]
+   },
+   "class_type": "FluxKontextImageScale",
+   "_meta": {
+    "title": "图像缩放为FluxKontext"
+   }
+  },
+  "192:31": {
+   "inputs": {
+    "seed": 169405236028824,
+    "steps": 20,
+    "cfg": 1,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "denoise": 1,
+    "model": [
+     "192:37",
+     0
+    ],
+    "positive": [
+     "192:35",
+     0
+    ],
+    "negative": [
+     "192:135",
+     0
+    ],
+    "latent_image": [
+     "192:124",
+     0
+    ]
+   },
+   "class_type": "KSampler",
+   "_meta": {
+    "title": "K采样器"
+   }
+  },
+  "192:6": {
+   "inputs": {
+    "text": "Using this elegant style, create a portrait of a swan wearing a pearl tiara and lace collar, maintaining the same refined quality and soft color tones.",
+    "clip": [
+     "192:38",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Positive Prompt)"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "id": "prompt",
+   "type": "prompt",
+   "node": "192:6",
+   "field": "text",
+   "label": "提示词",
+   "default": "Using this elegant style, create a portrait of a swan wearing a pearl tiara and lace collar, maintaining the same refined quality and soft color tones."
+  },
+  {
+   "id": "image1",
+   "type": "image",
+   "node": "190",
+   "field": "image",
+   "label": "原图"
+  },
+  {
+   "id": "seed1",
+   "type": "seed",
+   "node": "192:31",
+   "field": "seed",
+   "label": "种子"
+  }
+ ],
+ "outputs": [
+  "136"
+ ],
+ "models": [
+  {
+   "name": "ae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors",
+   "directory": "vae"
+  },
+  {
+   "name": "clip_l.safetensors",
+   "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+   "directory": "text_encoders"
+  },
+  {
+   "name": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+   "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors",
+   "directory": "text_encoders"
+  },
+  {
+   "name": "flux1-dev-kontext_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors",
+   "directory": "diffusion_models"
+  }
+ ]
+}

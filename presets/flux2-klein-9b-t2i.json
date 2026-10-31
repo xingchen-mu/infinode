@@ -1,0 +1,282 @@
+{
+ "format": "comfy-canva/preset",
+ "version": 1,
+ "id": "flux2-klein-9b-t2i",
+ "template": "image_flux2_text_to_image_9b",
+ "name": "Flux.2 Klein 9B 文生图",
+ "description": "Flux.2 轻量版，显存要求较低",
+ "category": "图片生成",
+ "kind": "image",
+ "usage": 384,
+ "tags": [
+  "Image",
+  "Text to Image"
+ ],
+ "graph": {
+  "9": {
+   "inputs": {
+    "filename_prefix": "Flux2-Klein",
+    "images": [
+     "75:65",
+     0
+    ]
+   },
+   "class_type": "SaveImage",
+   "_meta": {
+    "title": "保存图像"
+   }
+  },
+  "75:61": {
+   "inputs": {
+    "sampler_name": "euler"
+   },
+   "class_type": "KSamplerSelect",
+   "_meta": {
+    "title": "K采样器选择"
+   }
+  },
+  "75:62": {
+   "inputs": {
+    "steps": 20,
+    "width": [
+     "75:68",
+     0
+    ],
+    "height": [
+     "75:69",
+     0
+    ]
+   },
+   "class_type": "Flux2Scheduler",
+   "_meta": {
+    "title": "Flux2调度器"
+   }
+  },
+  "75:63": {
+   "inputs": {
+    "cfg": 5,
+    "model": [
+     "75:70",
+     0
+    ],
+    "positive": [
+     "75:74",
+     0
+    ],
+    "negative": [
+     "75:67",
+     0
+    ]
+   },
+   "class_type": "CFGGuider",
+   "_meta": {
+    "title": "CFG引导器"
+   }
+  },
+  "75:64": {
+   "inputs": {
+    "noise": [
+     "75:73",
+     0
+    ],
+    "guider": [
+     "75:63",
+     0
+    ],
+    "sampler": [
+     "75:61",
+     0
+    ],
+    "sigmas": [
+     "75:62",
+     0
+    ],
+    "latent_image": [
+     "75:66",
+     0
+    ]
+   },
+   "class_type": "SamplerCustomAdvanced",
+   "_meta": {
+    "title": "自定义采样器（高级）"
+   }
+  },
+  "75:65": {
+   "inputs": {
+    "samples": [
+     "75:64",
+     0
+    ],
+    "vae": [
+     "75:72",
+     0
+    ]
+   },
+   "class_type": "VAEDecode",
+   "_meta": {
+    "title": "VAE解码"
+   }
+  },
+  "75:66": {
+   "inputs": {
+    "width": [
+     "75:68",
+     0
+    ],
+    "height": [
+     "75:69",
+     0
+    ],
+    "batch_size": 1
+   },
+   "class_type": "EmptyFlux2LatentImage",
+   "_meta": {
+    "title": "空Latent图像（Flux2）"
+   }
+  },
+  "75:67": {
+   "inputs": {
+    "text": "",
+    "clip": [
+     "75:71",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Negative Prompt)"
+   }
+  },
+  "75:68": {
+   "inputs": {
+    "value": 1024
+   },
+   "class_type": "PrimitiveInt",
+   "_meta": {
+    "title": "Width"
+   }
+  },
+  "75:69": {
+   "inputs": {
+    "value": 1024
+   },
+   "class_type": "PrimitiveInt",
+   "_meta": {
+    "title": "Height"
+   }
+  },
+  "75:73": {
+   "inputs": {
+    "noise_seed": 145965955694731
+   },
+   "class_type": "RandomNoise",
+   "_meta": {
+    "title": "随机噪波"
+   }
+  },
+  "75:70": {
+   "inputs": {
+    "unet_name": "flux-2-klein-base-9b-fp8.safetensors",
+    "weight_dtype": "default"
+   },
+   "class_type": "UNETLoader",
+   "_meta": {
+    "title": "UNet加载器"
+   }
+  },
+  "75:71": {
+   "inputs": {
+    "clip_name": "qwen_3_8b_fp8mixed.safetensors",
+    "type": "flux2",
+    "device": "default"
+   },
+   "class_type": "CLIPLoader",
+   "_meta": {
+    "title": "加载CLIP"
+   }
+  },
+  "75:72": {
+   "inputs": {
+    "vae_name": "full_encoder_small_decoder.safetensors"
+   },
+   "class_type": "VAELoader",
+   "_meta": {
+    "title": "加载VAE"
+   }
+  },
+  "75:74": {
+   "inputs": {
+    "text": "A vintage motorcycle parked in front of a retro diner at sunset, warm orange and pink sky, neon signs glowing, 80s vintage photo style, film grain, warm color cast",
+    "clip": [
+     "75:71",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Positive Prompt)"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "id": "prompt",
+   "type": "prompt",
+   "node": "75:74",
+   "field": "text",
+   "label": "提示词",
+   "default": "A vintage motorcycle parked in front of a retro diner at sunset, warm orange and pink sky, neon signs glowing, 80s vintage photo style, film grain, warm color cast"
+  },
+  {
+   "id": "negative",
+   "type": "negative",
+   "node": "75:67",
+   "field": "text",
+   "label": "反向提示词",
+   "default": ""
+  },
+  {
+   "id": "seed1",
+   "type": "seed",
+   "node": "75:73",
+   "field": "noise_seed",
+   "label": "种子"
+  },
+  {
+   "id": "p_width",
+   "type": "width",
+   "node": "75:68",
+   "field": "value",
+   "label": "宽",
+   "default": 1024
+  },
+  {
+   "id": "p_height",
+   "type": "height",
+   "node": "75:69",
+   "field": "value",
+   "label": "高",
+   "default": 1024
+  }
+ ],
+ "outputs": [
+  "9"
+ ],
+ "models": [
+  {
+   "name": "flux-2-klein-base-9b-fp8.safetensors",
+   "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8/resolve/main/flux-2-klein-base-9b-fp8.safetensors",
+   "directory": "diffusion_models"
+  },
+  {
+   "name": "qwen_3_8b_fp8mixed.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors",
+   "directory": "text_encoders"
+  },
+  {
+   "name": "full_encoder_small_decoder.safetensors",
+   "url": "https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors",
+   "directory": "vae"
+  }
+ ]
+}

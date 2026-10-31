@@ -1,0 +1,344 @@
+{
+ "format": "comfy-canva/preset",
+ "version": 1,
+ "id": "wan2.2-flf2v",
+ "template": "video_wan2_2_14B_flf2v",
+ "name": "Wan 2.2 首尾帧视频",
+ "description": "Wan 2.2 14B 首尾帧生成过渡视频",
+ "category": "视频生成",
+ "kind": "video",
+ "usage": 358,
+ "tags": [
+  "FLF2V",
+  "Video"
+ ],
+ "graph": {
+  "72": {
+   "inputs": {
+    "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+    "type": "wan",
+    "device": "default"
+   },
+   "class_type": "CLIPLoader",
+   "_meta": {
+    "title": "加载CLIP"
+   }
+  },
+  "73": {
+   "inputs": {
+    "shift": 8.000000000000002,
+    "model": [
+     "76",
+     0
+    ]
+   },
+   "class_type": "ModelSamplingSD3",
+   "_meta": {
+    "title": "采样算法（SD3）"
+   }
+  },
+  "74": {
+   "inputs": {
+    "shift": 8,
+    "model": [
+     "77",
+     0
+    ]
+   },
+   "class_type": "ModelSamplingSD3",
+   "_meta": {
+    "title": "采样算法（SD3）"
+   }
+  },
+  "76": {
+   "inputs": {
+    "unet_name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+    "weight_dtype": "default"
+   },
+   "class_type": "UNETLoader",
+   "_meta": {
+    "title": "UNet加载器"
+   }
+  },
+  "77": {
+   "inputs": {
+    "unet_name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+    "weight_dtype": "default"
+   },
+   "class_type": "UNETLoader",
+   "_meta": {
+    "title": "UNet加载器"
+   }
+  },
+  "78": {
+   "inputs": {
+    "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走",
+    "clip": [
+     "72",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Negative Prompt)"
+   }
+  },
+  "79": {
+   "inputs": {
+    "vae_name": "wan_2.1_vae.safetensors"
+   },
+   "class_type": "VAELoader",
+   "_meta": {
+    "title": "加载VAE"
+   }
+  },
+  "80": {
+   "inputs": {
+    "image": "video_wan2_2_14B_flf2v_start_image.png"
+   },
+   "class_type": "LoadImage",
+   "_meta": {
+    "title": "加载图像"
+   }
+  },
+  "81": {
+   "inputs": {
+    "width": 640,
+    "height": 640,
+    "length": 81,
+    "batch_size": 1,
+    "positive": [
+     "90",
+     0
+    ],
+    "negative": [
+     "78",
+     0
+    ],
+    "vae": [
+     "79",
+     0
+    ],
+    "start_image": [
+     "80",
+     0
+    ],
+    "end_image": [
+     "89",
+     0
+    ]
+   },
+   "class_type": "WanFirstLastFrameToVideo",
+   "_meta": {
+    "title": "Wan首尾帧视频"
+   }
+  },
+  "83": {
+   "inputs": {
+    "filename_prefix": "video/ComfyUI",
+    "format": "auto",
+    "format.codec": "auto",
+    "codec": "auto",
+    "video": [
+     "86",
+     0
+    ]
+   },
+   "class_type": "SaveVideo",
+   "_meta": {
+    "title": "保存视频"
+   }
+  },
+  "84": {
+   "inputs": {
+    "add_noise": "enable",
+    "noise_seed": 984937593540091,
+    "steps": 20,
+    "cfg": 4,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "start_at_step": 0,
+    "end_at_step": 10,
+    "return_with_leftover_noise": "enable",
+    "model": [
+     "73",
+     0
+    ],
+    "positive": [
+     "81",
+     0
+    ],
+    "negative": [
+     "81",
+     1
+    ],
+    "latent_image": [
+     "81",
+     2
+    ]
+   },
+   "class_type": "KSamplerAdvanced",
+   "_meta": {
+    "title": "K采样器（高级）"
+   }
+  },
+  "85": {
+   "inputs": {
+    "samples": [
+     "87",
+     0
+    ],
+    "vae": [
+     "79",
+     0
+    ]
+   },
+   "class_type": "VAEDecode",
+   "_meta": {
+    "title": "VAE解码"
+   }
+  },
+  "86": {
+   "inputs": {
+    "fps": 16,
+    "bit_depth": "auto",
+    "color_space": "sRGB",
+    "codec": "none",
+    "images": [
+     "85",
+     0
+    ]
+   },
+   "class_type": "CreateVideo",
+   "_meta": {
+    "title": "创建视频"
+   }
+  },
+  "87": {
+   "inputs": {
+    "add_noise": "disable",
+    "noise_seed": 0,
+    "steps": 20,
+    "cfg": 4,
+    "sampler_name": "euler",
+    "scheduler": "simple",
+    "start_at_step": 10,
+    "end_at_step": 10000,
+    "return_with_leftover_noise": "disable",
+    "model": [
+     "74",
+     0
+    ],
+    "positive": [
+     "81",
+     0
+    ],
+    "negative": [
+     "81",
+     1
+    ],
+    "latent_image": [
+     "84",
+     0
+    ]
+   },
+   "class_type": "KSamplerAdvanced",
+   "_meta": {
+    "title": "K采样器（高级）"
+   }
+  },
+  "89": {
+   "inputs": {
+    "image": "video_wan2_2_14B_flf2v_end_image.png"
+   },
+   "class_type": "LoadImage",
+   "_meta": {
+    "title": "加载图像"
+   }
+  },
+  "90": {
+   "inputs": {
+    "text": "冰晶组成的小猫突然被惊醒，愤怒的它抬头，渐渐长出色彩毛发变成为一个巨兽，像发现危险一样呲牙，瞪大眼睛",
+    "clip": [
+     "72",
+     0
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "CLIP Text Encode (Positive Prompt)"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "id": "prompt",
+   "type": "prompt",
+   "node": "90",
+   "field": "text",
+   "label": "提示词",
+   "default": "冰晶组成的小猫突然被惊醒，愤怒的它抬头，渐渐长出色彩毛发变成为一个巨兽，像发现危险一样呲牙，瞪大眼睛"
+  },
+  {
+   "id": "negative",
+   "type": "negative",
+   "node": "78",
+   "field": "text",
+   "label": "反向提示词",
+   "default": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+  },
+  {
+   "id": "image1",
+   "type": "image",
+   "node": "80",
+   "field": "image",
+   "label": "首帧"
+  },
+  {
+   "id": "image2",
+   "type": "image",
+   "node": "89",
+   "field": "image",
+   "label": "尾帧"
+  },
+  {
+   "id": "seed1",
+   "type": "seed",
+   "node": "84",
+   "field": "noise_seed",
+   "label": "种子"
+  },
+  {
+   "id": "seed2",
+   "type": "seed",
+   "node": "87",
+   "field": "noise_seed",
+   "label": "种子"
+  }
+ ],
+ "outputs": [
+  "83"
+ ],
+ "models": [
+  {
+   "name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+   "directory": "text_encoders"
+  },
+  {
+   "name": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+   "directory": "diffusion_models"
+  },
+  {
+   "name": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+   "directory": "diffusion_models"
+  },
+  {
+   "name": "wan_2.1_vae.safetensors",
+   "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+   "directory": "vae"
+  }
+ ]
+}

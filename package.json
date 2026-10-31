@@ -1,0 +1,51 @@
+{
+  "name": "comfy-canva",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Infinite canvas for ComfyUI: generate, edit and animate images on a board, with every result linked to its inputs.",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": [
+    "comfyui",
+    "infinite-canvas",
+    "ai-image",
+    "image-generation",
+    "video-generation",
+    "workflow",
+    "stable-diffusion"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n tunnel,server,web -c gray,cyan,magenta \"node scripts/tunnel.mjs\" \"tsx watch --clear-screen=false server/index.ts\" \"vite\"",
+    "dev:noTunnel": "concurrently -k -n server,web -c cyan,magenta \"tsx watch --clear-screen=false server/index.ts\" \"vite\"",
+    "tunnel": "node scripts/tunnel.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test:wf": "tsx scripts/test-workflow.ts",
+    "build:presets": "tsx scripts/build-presets.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.14",
+    "image-size": "^2.0.4",
+    "lucide-react": "^1.66.0",
+    "nanoid": "^6.0.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "playwright-core": "^1.64.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

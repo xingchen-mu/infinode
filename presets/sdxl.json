@@ -1,0 +1,173 @@
+{
+ "format": "comfy-canva/preset",
+ "version": 1,
+ "id": "sdxl",
+ "template": "image_sdxl_simple",
+ "name": "SDXL 文生图",
+ "description": "经典 SDXL，8G 显存可用",
+ "category": "图片生成",
+ "kind": "image",
+ "usage": 840,
+ "tags": [
+  "Image",
+  "Text to Image"
+ ],
+ "graph": {
+  "7": {
+   "inputs": {
+    "filename_prefix": "sdxl_simple",
+    "images": [
+     "14",
+     0
+    ]
+   },
+   "class_type": "SaveImage",
+   "_meta": {
+    "title": "保存图像"
+   }
+  },
+  "10": {
+   "inputs": {
+    "text": "a giant classical marble statue standing alone in a pure white empty void, soft diffused lighting, subtle shadows, surreal, minimalist, fine art photography, quiet atmosphere, sense of scale",
+    "clip": [
+     "15",
+     1
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "Positive Prompt"
+   }
+  },
+  "11": {
+   "inputs": {
+    "text": "color, colored, lowres, blurry, out of focus, deformed, bad anatomy, extra limbs, mutated, watermark, text, logo, signature\n",
+    "clip": [
+     "15",
+     1
+    ]
+   },
+   "class_type": "CLIPTextEncode",
+   "_meta": {
+    "title": "Negative Prompt"
+   }
+  },
+  "12": {
+   "inputs": {
+    "seed": 812045847300606,
+    "steps": 25,
+    "cfg": 7,
+    "sampler_name": "dpmpp_2m",
+    "scheduler": "karras",
+    "denoise": 1,
+    "model": [
+     "15",
+     0
+    ],
+    "positive": [
+     "10",
+     0
+    ],
+    "negative": [
+     "11",
+     0
+    ],
+    "latent_image": [
+     "13",
+     0
+    ]
+   },
+   "class_type": "KSampler",
+   "_meta": {
+    "title": "K采样器"
+   }
+  },
+  "13": {
+   "inputs": {
+    "width": 1024,
+    "height": 1024,
+    "batch_size": 1
+   },
+   "class_type": "EmptyLatentImage",
+   "_meta": {
+    "title": "Empty Latent"
+   }
+  },
+  "14": {
+   "inputs": {
+    "samples": [
+     "12",
+     0
+    ],
+    "vae": [
+     "15",
+     2
+    ]
+   },
+   "class_type": "VAEDecode",
+   "_meta": {
+    "title": "VAE解码"
+   }
+  },
+  "15": {
+   "inputs": {
+    "ckpt_name": "sd_xl_base_1.0.safetensors"
+   },
+   "class_type": "CheckpointLoaderSimple",
+   "_meta": {
+    "title": "Checkpoint加载器（简易）"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "id": "prompt",
+   "type": "prompt",
+   "node": "10",
+   "field": "text",
+   "label": "提示词",
+   "default": "a giant classical marble statue standing alone in a pure white empty void, soft diffused lighting, subtle shadows, surreal, minimalist, fine art photography, quiet atmosphere, sense of scale"
+  },
+  {
+   "id": "negative",
+   "type": "negative",
+   "node": "11",
+   "field": "text",
+   "label": "反向提示词",
+   "default": "color, colored, lowres, blurry, out of focus, deformed, bad anatomy, extra limbs, mutated, watermark, text, logo, signature\n"
+  },
+  {
+   "id": "seed1",
+   "type": "seed",
+   "node": "12",
+   "field": "seed",
+   "label": "种子"
+  },
+  {
+   "id": "width",
+   "type": "width",
+   "node": "13",
+   "field": "width",
+   "label": "宽",
+   "default": 1024
+  },
+  {
+   "id": "height",
+   "type": "height",
+   "node": "13",
+   "field": "height",
+   "label": "高",
+   "default": 1024
+  }
+ ],
+ "outputs": [
+  "7"
+ ],
+ "models": [
+  {
+   "name": "sd_xl_base_1.0.safetensors",
+   "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors?download=true",
+   "directory": "checkpoints"
+  }
+ ]
+}

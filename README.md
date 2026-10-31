@@ -1,0 +1,174 @@
+<div align="center">
+
+<img src="docs/media/logo.svg" width="72" alt="" />
+
+# Comfy Canva
+
+**把 ComfyUI 搬上无限画布** · 生图、改图、生视频，每个结果都用连线连回它的来源
+
+[功能](#功能) · [快速开始](#快速开始) · [官方模板](#官方模板) · [导入你的工作流](#导入你自己的工作流) · [许可证](#许可证) · [English](#english)
+
+<img src="docs/media/hero.png" alt="Comfy Canva 画布" />
+
+</div>
+
+## 这是什么
+
+ComfyUI 很强，但节点图不适合"边看边改"的创作。Comfy Canva 是一个跑在你自己电脑上的网页画布：在底部写一句话出图，选中图片点一下就能改图、扩图、抠图、超清、生成视频，所有生成都交给**你自己的 ComfyUI** 完成。每个结果都会用一条线连回它的输入，整条创作链一目了然。
+
+<div align="center">
+<img src="docs/media/demo.gif" alt="演示" width="860" />
+
+▶ 完整宣传片见 [Releases](../../releases/latest)
+</div>
+
+## 功能
+
+- **无限画布**：双指平移、捏合缩放、框选、拖拽缩放、撤销重做、复制粘贴；直接拖入或粘贴图片；自动保存，多画布切换
+- **连线即工作流**：结果自动连回它的参考图 / 首帧 / 原图；悬停或选中时显示每条线的用途；从图片右侧的 `+` 拉出一条线，在终点生成下一步
+- **内置工具**：文生图、参考图编辑（多图）、局部重绘、消除、扩图、抠图（透明 PNG）、SeedVR2 超清、图生视频 / 文生视频 / 首尾帧 / 多图参考视频（MiniMax H3，自带声音）
+- **25 个官方模板**：从 ComfyUI 官方模板转换的预设（Qwen-Image、Z-Image、Flux.2、Krea 2、LTX-2.3、Wan 2.2、MiniMax H3、SeedVR2 …），装好模型就能用；缺什么模型、下载地址、放哪个文件夹都会写出来
+- **导入你自己的工作流**：ComfyUI 里「导出 (API)」得到的 JSON 拖进来，自动识别提示词、图片输入、种子、尺寸和参数，导入后就是画布上的新工具
+- **本地部署**：页面和数据都在你自己的机器上；ComfyUI 可以在本机、局域网或远程服务器（支持自动 SSH 隧道）
+- **实时进度**：排队位置、当前阶段、进度条、已用时间，可随时取消，失败一键重试
+
+<table>
+<tr>
+<td><img src="docs/media/tools.png" alt="改图工具" /></td>
+<td><img src="docs/media/templates.png" alt="模板库" /></td>
+</tr>
+<tr>
+<td align="center">选中图片：超清 · 扩图 · 局部重绘 · 消除 · 抠图 · 生视频</td>
+<td align="center">模板库：可用状态、缺失模型和下载地址</td>
+</tr>
+<tr>
+<td><img src="docs/media/import.png" alt="导入工作流" /></td>
+<td><img src="docs/media/link.png" alt="拉线生成" /></td>
+</tr>
+<tr>
+<td align="center">导入工作流：自动识别输入，可手动调整</td>
+<td align="center">从图片拉出一条线，在终点生成</td>
+</tr>
+</table>
+
+## 快速开始
+
+需要：
+
+- [Node.js](https://nodejs.org/) 22 或更高
+- 一个可以访问的 [ComfyUI](https://github.com/comfyanonymous/ComfyUI)（建议较新的版本，官方模板依赖新版自带的节点）
+- 桌面浏览器（Chrome / Edge / Safari）
+
+```bash
+git clone <本仓库地址> comfy-canva
+cd comfy-canva
+npm install
+npm run dev
+```
+
+打开 <http://localhost:5173>。点右上角的 ComfyUI 状态按钮进入**设置**，填入 ComfyUI 地址（本机默认 `http://127.0.0.1:8188`），测试通过后保存。
+
+### 连接不同位置的 ComfyUI
+
+| ComfyUI 在哪 | 怎么连 |
+|---|---|
+| 本机 | 默认地址 `http://127.0.0.1:8188`，不用改 |
+| 局域网 / 服务器，可直接访问 | ComfyUI 启动时加 `--listen`，在设置里填 `http://服务器IP:8188` |
+| 服务器，只监听它自己的 127.0.0.1 | 复制 `.env.example` 为 `.env`，填上 `SSH_HOST`（`~/.ssh/config` 里的主机别名，需免密登录）。`npm run dev` 会自动建立并保持 SSH 隧道 |
+
+Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。
+
+## 使用
+
+| 操作 | 方式 |
+|---|---|
+| 生成 | 底部输入框写提示词，选择图片 / 视频和模型，回车 |
+| 参考图 / 首帧 | 先在画布上选中图片（可多选），再生成；提示词里用 `@图1`、`@图2` 指代 |
+| 改图 | 选中图片，上方工具栏：超清、扩图、局部重绘、消除、抠图、生视频、我的工具 |
+| 拉线生成 | 拖动图片右侧的 `+`，在空白处松开，结果会生成在虚线框里 |
+| 平移 / 缩放 | 双指滑动或滚轮 / 双指捏合或 ⌘+滚轮；空格+拖动 |
+| 预览 | 双击图片或视频（视频带声音） |
+| 连线 | 悬停或选中图片高亮它的连线；`L` 显示 / 隐藏全部连线 |
+| 其他 | `⌘Z` 撤销、`⌘D` 复制一份、`Delete` 删除、`⇧1` 显示全部、`/` 聚焦输入框 |
+
+## 官方模板
+
+模型列表里的「浏览模板库」收录了 25 个 ComfyUI 官方模板，按图片生成、图片编辑、视频生成、工具分类。每个模板会实时检查你的 ComfyUI：
+
+- **可以直接用**：节点和模型都在，点「使用」即可
+- **缺少 N 项**：列出缺少的模型、下载地址和应该放的 `models/…` 文件夹，或缺少的节点
+
+模型名不完全一致也没关系：同一个模型的不同精度（int8 / bf16 / fp8）或放在子文件夹里的文件会被自动识别。
+
+模板是用 `scripts/build-presets.ts` 把官方模板在 ComfyUI 前端里导出成 API 格式、再整理参数生成的，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 导入你自己的工作流
+
+1. 在 ComfyUI 里打开你的工作流，菜单「工作流 → 导出 (API)」（Workflow → Export (API)）
+2. 在 Comfy Canva 右上角「我的工作流」里导入这个 JSON
+3. 检查自动识别的映射：提示词、反向提示词、图片 / 视频输入、种子、尺寸、比例……也可以把任意节点字段（步数、强度、LoRA 权重、下拉选项）暴露成画布上的参数
+4. 保存后，它会出现在底部输入框的模型列表和图片工具栏的「我的工具」里
+
+在 ComfyUI 里把节点标题改成下面的样子，导入时会按标题识别：
+
+| 节点标题 | 含义 |
+|---|---|
+| `@prompt` / `@negative` | 提示词 / 反向提示词 |
+| `@image`、`@image:人物` | 图片输入（冒号后是显示名称） |
+| `@video` / `@mask` | 视频输入 / 蒙版 |
+| `@seed` / `@size` / `@output` | 随机种子 / 输出尺寸 / 结果节点 |
+
+工作流可以导出成 `.canva.json` 分享给别人，对方直接导入即可。
+
+## 内置工具用到的模型
+
+内置工具会在你的 ComfyUI 里自动查找下列模型（不同精度和子文件夹都能识别），缺模型的工具会在设置页标出来：
+
+| 工具 | 模型 |
+|---|---|
+| 文生图 / 参考图编辑 / 局部重绘 / 消除 / 扩图 / 抠图 | Qwen-Image 2.1（diffusion model + qwen3vl 8b 文本编码器 + VAE） |
+| 极速文生图 | Z-Image Turbo（+ qwen_3_4b + ae VAE） |
+| 超清 | SeedVR2（需要 [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) 节点） |
+| 视频 | MiniMax H3（fl2va / ref2va + qwen3vl 32b + 视频 / 音频 VAE，可选 turbo LoRA 加速） |
+
+## 常见问题
+
+**第一次生成特别慢？** ComfyUI 第一次用某个模型要从硬盘加载，可能要几分钟；之后在显存里就快了。图片模型和视频模型轮流用会反复加载。
+
+**提示 fp8 不支持？** ComfyUI 用 `--enable-triton-backend` 启动时，RTX 40 系列以前的显卡（如 RTX 3090、A100）跑不了 fp8 模型。去掉这个参数，或换用 bf16 / int8 版本的模型。用到 fp8 模型的工具会被自动标为不可用。
+
+**远程服务器上传图片很慢？** 本地图片第一次用作输入时需要传到服务器，取决于你的上行带宽，每张只传一次。画布上生成的结果本来就在服务器上，接着编辑不需要上传。
+
+**数据存在哪？** 都在项目的 `data/` 目录：图片视频、画布、任务记录、导入的工作流。删掉它即可清空。
+
+**生产部署？** `npm run build && npm start`，只占用一个端口（默认 `http://127.0.0.1:8787`）。
+
+## 许可证
+
+Comfy Canva 是**源码公开**的项目，采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+
+- **个人和非商业使用免费**：自己创作、学习、研究，以及教育、科研、公益机构
+- **商业使用需要授权**：公司内部使用、集成进收费产品或服务、用它接单等，见 [COMMERCIAL.md](COMMERCIAL.md)
+
+注意：ComfyUI、自定义节点和模型各有自己的许可证，部分模型不允许商用，请分别确认。`presets/` 中的模板来自 ComfyUI 官方模板（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+欢迎参与贡献，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+## English
+
+**Comfy Canva** is an infinite canvas for ComfyUI. Type a prompt to generate, select an image to edit, extend, cut out, upscale or animate it, and every result stays linked to the inputs it was made from. All generation runs on **your own ComfyUI** (local, LAN or remote over an automatic SSH tunnel).
+
+- Built-in tools: text-to-image, multi-reference editing, inpaint, erase, outpaint, background removal, SeedVR2 upscaling, image/text/first-last-frame/reference-to-video with native audio (MiniMax H3)
+- 25 official ComfyUI templates as ready-made tools, with per-template model checks, download links and target folders
+- Import any workflow from ComfyUI's **Export (API)**: prompts, image inputs, seed, size and parameters are detected and editable
+- Drag a line out of an image to place the next generation exactly where you want it
+
+```bash
+git clone <this repository> comfy-canva && cd comfy-canva
+npm install
+npm run dev   # open http://localhost:5173, then set your ComfyUI address in Settings
+```
+
+**License:** source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other noncommercial use; commercial use requires a license, see [COMMERCIAL.md](COMMERCIAL.md). Models and ComfyUI have their own licenses.
