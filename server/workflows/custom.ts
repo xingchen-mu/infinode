@@ -70,7 +70,8 @@ function customTitle(node: ComfyApiNode, info?: ObjectInfo): string | undefined 
 export function parseWorkflowJson(json: unknown): { graph: ComfyApiGraph; saved?: Partial<CustomWorkflow> } {
   if (!json || typeof json !== 'object') throw new WorkflowFormatError('不是有效的 JSON 文件');
   const obj = json as Record<string, unknown>;
-  if (obj.format === 'comfy-canva/workflow' && obj.graph && typeof obj.graph === 'object') {
+  // comfy-canva/workflow: files exported before the project was renamed.
+  if ((obj.format === 'infinode/workflow' || obj.format === 'comfy-canva/workflow') && obj.graph && typeof obj.graph === 'object') {
     const { format: _f, version: _v, ...rest } = obj;
     return { graph: obj.graph as ComfyApiGraph, saved: rest as Partial<CustomWorkflow> };
   }
@@ -544,7 +545,7 @@ export function buildCustom(wf: CustomWorkflow, req: Extract<TaskRequest, { op: 
   // Keep results together in ComfyUI's output folder.
   for (const id of wf.outputs) {
     const node = graph[id];
-    if (node && typeof node.inputs.filename_prefix === 'string') node.inputs.filename_prefix = `canva/${slug(wf.name)}`;
+    if (node && typeof node.inputs.filename_prefix === 'string') node.inputs.filename_prefix = `infinode/${slug(wf.name)}`;
   }
 
   const first = files.images[0];

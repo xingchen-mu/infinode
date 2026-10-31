@@ -1,5 +1,5 @@
 {
- "format": "comfy-canva/preset",
+ "format": "infinode/preset",
  "version": 1,
  "id": "qwen-edit-2511",
  "template": "image_qwen_image_edit_2511_int8",

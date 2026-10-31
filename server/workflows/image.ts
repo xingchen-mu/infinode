@@ -1,7 +1,7 @@
 import { Graph, type BuiltWorkflow, type Handle, type InputFile, capPixels, snap } from './graph.ts';
 import { model as modelFile } from './models.ts';
 
-const PREFIX = 'canva/';
+const PREFIX = 'infinode/';
 
 // ---------------------------------------------------------------- Z-Image Turbo
 

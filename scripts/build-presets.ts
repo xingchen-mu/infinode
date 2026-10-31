@@ -90,7 +90,7 @@ for (const src of sources) {
     const used = new Set(Object.values(graph).flatMap((n) => Object.values(n.inputs).filter((v) => typeof v === 'string')));
     const t = meta.get(src.template);
     const preset = {
-      format: 'comfy-canva/preset',
+      format: 'infinode/preset',
       version: 1,
       id: src.id,
       template: src.template,

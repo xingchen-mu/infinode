@@ -4,7 +4,7 @@ import { cloneItems } from './actions';
 import { boundsOf } from './geometry';
 
 /** Written to the system clipboard on copy, so a later paste knows to use our items. */
-export const CLIP_MARKER = 'comfy-canva:items';
+export const CLIP_MARKER = 'infinode:items';
 
 let copied: CanvasItem[] = [];
 let pasteCount = 0;

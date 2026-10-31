@@ -167,11 +167,11 @@ function inputSummary(wf: CustomWorkflow) {
 }
 
 function exportWorkflow(wf: CustomWorkflow) {
-  const data = { format: 'comfy-canva/workflow', version: 1, name: wf.name, description: wf.description, kind: wf.kind, graph: wf.graph, inputs: wf.inputs, outputs: wf.outputs };
+  const data = { format: 'infinode/workflow', version: 1, name: wf.name, description: wf.description, kind: wf.kind, graph: wf.graph, inputs: wf.inputs, outputs: wf.outputs };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${wf.name.replace(/[\\/:*?"<>|]+/g, '_')}.canva.json`;
+  a.download = `${wf.name.replace(/[\\/:*?"<>|]+/g, '_')}.infinode.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -223,7 +223,7 @@ function WorkflowsModal() {
       wide
       footer={
         <>
-          <span className="m-help">支持 ComfyUI「导出 (API)」的 JSON，和这里导出的 .canva.json</span>
+          <span className="m-help">支持 ComfyUI「导出 (API)」的 JSON，和这里导出的 .infinode.json</span>
           <button className="btn primary" onClick={() => input.current?.click()}>
             <Upload /> 导入工作流
           </button>

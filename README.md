@@ -2,19 +2,23 @@
 
 <img src="docs/media/logo.svg" width="72" alt="" />
 
-# Comfy Canva
+# Infinode
 
-**把 ComfyUI 搬上无限画布** · 生图、改图、生视频，每个结果都用连线连回它的来源
+**为 ComfyUI 而生的无限画布** · 生图、改图、生视频，每个结果都用连线连回它的来源
 
 [功能](#功能) · [快速开始](#快速开始) · [官方模板](#官方模板) · [导入你的工作流](#导入你自己的工作流) · [许可证](#许可证) · [English](#english)
 
-<img src="docs/media/hero.png" alt="Comfy Canva 画布" />
+<img src="docs/media/hero.png" alt="Infinode 画布" />
 
 </div>
 
 ## 这是什么
 
-ComfyUI 很强，但节点图不适合"边看边改"的创作。Comfy Canva 是一个跑在你自己电脑上的网页画布：在底部写一句话出图，选中图片点一下就能改图、扩图、抠图、超清、生成视频，所有生成都交给**你自己的 ComfyUI** 完成。每个结果都会用一条线连回它的输入，整条创作链一目了然。
+ComfyUI 很强，但节点图不适合"边看边改"的创作。Infinode 是一个跑在你自己电脑上的网页画布：在底部写一句话出图，选中图片点一下就能改图、扩图、抠图、超清、生成视频，所有生成都交给**你自己的 ComfyUI** 完成。每个结果都会用一条线连回它的输入，整条创作链一目了然。
+
+Infinode 只做画布，不包含、也不分发任何模型。用哪个模型、哪个工作流，完全由你的 ComfyUI 决定；模型的许可证由使用者自己遵守，见[模型许可证](#模型许可证)。
+
+名字来自 infinite + node：无限画布上的每个结果，都是一个连着来源的节点。
 
 <div align="center">
 <img src="docs/media/demo.gif" alt="演示" width="860" />
@@ -60,8 +64,8 @@ ComfyUI 很强，但节点图不适合"边看边改"的创作。Comfy Canva 是�
 - 桌面浏览器（Chrome / Edge / Safari）
 
 ```bash
-git clone <本仓库地址> comfy-canva
-cd comfy-canva
+git clone <本仓库地址> infinode
+cd infinode
 npm install
 npm run dev
 ```
@@ -76,7 +80,7 @@ npm run dev
 | 局域网 / 服务器，可直接访问 | ComfyUI 启动时加 `--listen`，在设置里填 `http://服务器IP:8188` |
 | 服务器，只监听它自己的 127.0.0.1 | 复制 `.env.example` 为 `.env`，填上 `SSH_HOST`（`~/.ssh/config` 里的主机别名，需免密登录）。`npm run dev` 会自动建立并保持 SSH 隧道 |
 
-Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。注意后端没有登录验证，同一网络里的人都能使用和删除你的作品，只在你信任的网络里这样做，见 [SECURITY.md](SECURITY.md)。
+Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。注意后端没有登录验证，同一网络里的人都能使用和删除你的作品，只在你信任的网络里这样做，见 [SECURITY.md](SECURITY.md)。
 
 ## 使用
 
@@ -105,7 +109,7 @@ Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里�
 ## 导入你自己的工作流
 
 1. 在 ComfyUI 里打开你的工作流，菜单「工作流 → 导出 (API)」（Workflow → Export (API)）
-2. 在 Comfy Canva 右上角「我的工作流」里导入这个 JSON
+2. 在 Infinode 右上角「我的工作流」里导入这个 JSON
 3. 检查自动识别的映射：提示词、反向提示词、图片 / 视频输入、种子、尺寸、比例……也可以把任意节点字段（步数、强度、LoRA 权重、下拉选项）暴露成画布上的参数
 4. 保存后，它会出现在底部输入框的模型列表和图片工具栏的「我的工具」里
 
@@ -118,7 +122,7 @@ Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里�
 | `@video` / `@mask` | 视频输入 / 蒙版 |
 | `@seed` / `@size` / `@output` | 随机种子 / 输出尺寸 / 结果节点 |
 
-工作流可以导出成 `.canva.json` 分享给别人，对方直接导入即可。
+工作流可以导出成 `.infinode.json` 分享给别人，对方直接导入即可。
 
 ## 内置工具用到的模型
 
@@ -133,7 +137,7 @@ Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里�
 
 ### 模型许可证
 
-Comfy Canva 的许可证只管它自己的代码，你用的每个模型另有许可证，商用前要分别确认。内置工具用到的两个模型限制比较多：
+Infinode 的许可证只管它自己的代码，你用的每个模型另有许可证，商用前要分别确认。内置工具用到的两个模型限制比较多：
 
 - **Qwen-Image 2.1**：只允许研究和评估用途，商用要另外向模型方申请授权。需要商用的话，文生图和改图可以换用模板库里 Apache 2.0 的 Qwen-Image 2512、Qwen-Image-Edit 2511 或 Z-Image Turbo。
 - **MiniMax H3**：可以商用，但商用产品的界面上要标明"MiniMax H3"，年收入超过 2000 万美元要另外取得授权。它的许可证**不覆盖美国、欧盟、英国和韩国**：在这些地区不能使用这个模型，也不能展示它生成的内容。
@@ -154,7 +158,7 @@ Comfy Canva 的许可证只管它自己的代码，你用的每个模型另有�
 
 ## 许可证
 
-Comfy Canva 是**源码公开**的项目，采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+Infinode 是**源码公开**的项目，采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
 
 - **个人和非商业使用免费**：自己创作、学习、研究，以及教育、科研、公益机构
 - **商业使用需要授权**：公司内部使用、集成进收费产品或服务、用它接单等，见 [COMMERCIAL.md](COMMERCIAL.md)
@@ -163,11 +167,13 @@ Comfy Canva 是**源码公开**的项目，采用 [PolyForm Noncommercial Licens
 
 欢迎参与贡献，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
+Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org 的商标。
+
 ---
 
 ## English
 
-**Comfy Canva** is an infinite canvas for ComfyUI. Type a prompt to generate, select an image to edit, extend, cut out, upscale or animate it, and every result stays linked to the inputs it was made from. All generation runs on **your own ComfyUI** (local, LAN or remote over an automatic SSH tunnel).
+**Infinode** is an infinite canvas built for ComfyUI. Type a prompt to generate, select an image to edit, extend, cut out, upscale or animate it, and every result stays linked to the inputs it was made from. All generation runs on **your own ComfyUI** (local, LAN or remote over an automatic SSH tunnel). Infinode only does the canvas: it does not include or distribute any models, so which models and workflows you run is up to you.
 
 - Built-in tools: text-to-image, multi-reference editing, inpaint, erase, outpaint, background removal, SeedVR2 upscaling, image/text/first-last-frame/reference-to-video with native audio (MiniMax H3)
 - 25 official ComfyUI templates as ready-made tools, with per-template model checks, download links and target folders
@@ -175,7 +181,7 @@ Comfy Canva 是**源码公开**的项目，采用 [PolyForm Noncommercial Licens
 - Drag a line out of an image to place the next generation exactly where you want it
 
 ```bash
-git clone <this repository> comfy-canva && cd comfy-canva
+git clone <this repository> infinode && cd infinode
 npm install
 npm run dev   # open http://localhost:5173, then set your ComfyUI address in Settings
 ```
@@ -183,3 +189,5 @@ npm run dev   # open http://localhost:5173, then set your ComfyUI address in Set
 **License:** source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other noncommercial use; commercial use requires a license, see [COMMERCIAL.md](COMMERCIAL.md).
 
 **Model licenses are separate.** The built-in image tools use Qwen-Image 2.1, which is licensed for research and evaluation only. MiniMax H3 allows commercial use with conditions, but its license does not cover the US, the EU, the UK or South Korea: the model may not be used, nor its outputs displayed, there. Z-Image Turbo, Qwen-Image 2512 / Edit 2511, Wan 2.2 and SeedVR2 are Apache 2.0. Check each model's own license before use.
+
+Infinode is a community project and is not affiliated with Comfy Org. ComfyUI is a trademark of Comfy Org.

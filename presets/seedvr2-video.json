@@ -1,5 +1,5 @@
 {
- "format": "comfy-canva/preset",
+ "format": "infinode/preset",
  "version": 1,
  "id": "seedvr2-video",
  "template": "utility_seedvr2_3b_int8_upscale_video",

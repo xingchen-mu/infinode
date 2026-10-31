@@ -35,7 +35,7 @@ async function stableClientId() {
   try {
     return (await readFile(file, 'utf8')).trim();
   } catch {
-    const id = `comfy-canva-${randomUUID().slice(0, 8)}`;
+    const id = `infinode-${randomUUID().slice(0, 8)}`;
     await mkdir(config.dataDir, { recursive: true });
     await writeFile(file, id);
     return id;
@@ -401,7 +401,7 @@ if (config.production) {
 }
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, (info) => {
-  console.log(`comfy-canva server on http://${config.host}:${info.port}  (ComfyUI: ${comfy.baseUrl})`);
+  console.log(`infinode server on http://${config.host}:${info.port}  (ComfyUI: ${comfy.baseUrl})`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

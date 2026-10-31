@@ -2,7 +2,7 @@ import { fitAll } from './lib/actions';
 import { api } from './lib/api';
 import { applyTask, resolveItems, toast, useStore } from './store';
 
-const LAST_KEY = 'comfy-canva:last-project';
+const LAST_KEY = 'infinode:last-project';
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let loading = false;

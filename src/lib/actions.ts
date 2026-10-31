@@ -444,7 +444,7 @@ export function download(item: CanvasItem) {
   const ext = item.asset.url.split('.').pop();
   const a = document.createElement('a');
   a.href = item.asset.url;
-  a.download = `comfy-canva-${item.id}.${ext}`;
+  a.download = `infinode-${item.id}.${ext}`;
   a.click();
 }
 

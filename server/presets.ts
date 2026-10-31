@@ -26,7 +26,7 @@ export class PresetStore {
     for (const name of names) {
       try {
         const p = JSON.parse(await readFile(join(this.dir, name), 'utf8'));
-        if (p.format !== 'comfy-canva/preset' || !p.graph) continue;
+        if (p.format !== 'infinode/preset' || !p.graph) continue;
         const preset: Preset = {
           id: `tpl_${p.id}`,
           name: p.name,

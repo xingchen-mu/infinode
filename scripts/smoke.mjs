@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 const port = process.env.SMOKE_PORT ?? '8797';
 const base = `http://127.0.0.1:${port}`;
-const dataDir = mkdtempSync(join(tmpdir(), 'comfy-canva-smoke-'));
+const dataDir = mkdtempSync(join(tmpdir(), 'infinode-smoke-'));
 
 let output = '';
 const server = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {

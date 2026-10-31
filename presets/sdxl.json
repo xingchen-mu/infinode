@@ -1,5 +1,5 @@
 {
- "format": "comfy-canva/preset",
+ "format": "infinode/preset",
  "version": 1,
  "id": "sdxl",
  "template": "image_sdxl_simple",

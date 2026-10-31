@@ -1,7 +1,7 @@
 import { Graph, type BuiltWorkflow, type InputFile } from './graph.ts';
 import { model as modelFile } from './models.ts';
 
-const PREFIX = 'canva/';
+const PREFIX = 'infinode/';
 
 function saveVideo(g: Graph, video: unknown, name: string) {
   return g.add('SaveVideo', { video, filename_prefix: PREFIX + name, format: 'auto', 'format.codec': 'auto' });

@@ -1,6 +1,6 @@
 ---
 name: 商业授权 / Commercial license
-about: 在公司、收费产品或付费服务中使用 Comfy Canva
+about: 在公司、收费产品或付费服务中使用 Infinode
 title: "[商业授权] "
 labels: commercial-license
 ---

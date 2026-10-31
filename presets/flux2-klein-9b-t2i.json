@@ -1,5 +1,5 @@
 {
- "format": "comfy-canva/preset",
+ "format": "infinode/preset",
  "version": 1,
  "id": "flux2-klein-9b-t2i",
  "template": "image_flux2_text_to_image_9b",

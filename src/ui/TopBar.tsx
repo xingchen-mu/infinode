@@ -205,7 +205,7 @@ export function TopBar() {
   return (
     <>
       <div className="topbar left" data-ui>
-        <div className="logo" title="Comfy Canva">
+        <div className="logo" title="Infinode">
           <svg viewBox="0 0 32 32" width="22" height="22">
             <rect width="32" height="32" rx="8" fill="#23252b" />
             <path d="M8 23l5.5-7.5 4 5 3-3.2L25 23z" fill="#b8f36b" />

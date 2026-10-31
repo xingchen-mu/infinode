@@ -46,7 +46,7 @@ if (args[0] === 'mask') {
   process.exit(0);
 }
 
-const comfy = new ComfyClient(process.env.COMFY_URL ?? 'http://127.0.0.1:8188', `comfy-canva-test-${process.pid}`);
+const comfy = new ComfyClient(process.env.COMFY_URL ?? 'http://127.0.0.1:8188', `infinode-test-${process.pid}`);
 const outDir = process.env.OUT ?? 'scratch-out';
 await mkdir(outDir, { recursive: true });
 
