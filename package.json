@@ -24,6 +24,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
     "test:wf": "tsx scripts/test-workflow.ts",
     "build:presets": "tsx scripts/build-presets.ts"
   },

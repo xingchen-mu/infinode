@@ -10,7 +10,10 @@
 npm install
 npm run dev          # 前端 http://localhost:5173 + 后端 http://127.0.0.1:8787
 npm run typecheck    # 提交前请确保没有类型错误
+npm run build && npm run smoke   # 和 CI 一样：构建，再检查后端在没有 ComfyUI 时能否正常启动
 ```
+
+每个 Pull Request 都会自动运行 CI：在 Node 22 / 24 / 26 上做类型检查、构建和启动检查。CI 不连 ComfyUI，改了生成逻辑请自己在真实的 ComfyUI 上跑一遍，并在 PR 里写明。
 
 ## 代码结构
 
@@ -54,4 +57,4 @@ npm run test:wf -- '{"op":"image.generate","model":"zimage","prompt":"a cat","as
 
 ---
 
-**English summary:** Issues and PRs are welcome. Run `npm run typecheck` before submitting. By submitting a pull request you confirm the contribution is yours to submit, and you agree that it is released under this project's license and may also be included in the commercial licenses the maintainers grant (a perpetual, worldwide, royalty-free, non-exclusive grant).
+**English summary:** Issues and PRs are welcome. Run `npm run typecheck` before submitting; CI runs typecheck, build and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit, and you agree that it is released under this project's license and may also be included in the commercial licenses the maintainers grant (a perpetual, worldwide, royalty-free, non-exclusive grant).

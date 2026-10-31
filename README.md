@@ -76,7 +76,7 @@ npm run dev
 | 局域网 / 服务器，可直接访问 | ComfyUI 启动时加 `--listen`，在设置里填 `http://服务器IP:8188` |
 | 服务器，只监听它自己的 127.0.0.1 | 复制 `.env.example` 为 `.env`，填上 `SSH_HOST`（`~/.ssh/config` 里的主机别名，需免密登录）。`npm run dev` 会自动建立并保持 SSH 隧道 |
 
-Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。
+Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。注意后端没有登录验证，同一网络里的人都能使用和删除你的作品，只在你信任的网络里这样做，见 [SECURITY.md](SECURITY.md)。
 
 ## 使用
 
@@ -124,12 +124,21 @@ Comfy Canva 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里�
 
 内置工具会在你的 ComfyUI 里自动查找下列模型（不同精度和子文件夹都能识别），缺模型的工具会在设置页标出来：
 
-| 工具 | 模型 |
-|---|---|
-| 文生图 / 参考图编辑 / 局部重绘 / 消除 / 扩图 / 抠图 | Qwen-Image 2.1（diffusion model + qwen3vl 8b 文本编码器 + VAE） |
-| 极速文生图 | Z-Image Turbo（+ qwen_3_4b + ae VAE） |
-| 超清 | SeedVR2（需要 [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) 节点） |
-| 视频 | MiniMax H3（fl2va / ref2va + qwen3vl 32b + 视频 / 音频 VAE，可选 turbo LoRA 加速） |
+| 工具 | 模型 | 模型许可证 |
+|---|---|---|
+| 文生图 / 参考图编辑 / 局部重绘 / 消除 / 扩图 / 抠图 | Qwen-Image 2.1（diffusion model + qwen3vl 8b 文本编码器 + VAE） | Qwen Research License：只允许研究和评估 |
+| 极速文生图 | Z-Image Turbo（+ qwen_3_4b + ae VAE） | Apache 2.0 |
+| 超清 | SeedVR2（需要 [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) 节点） | Apache 2.0 |
+| 视频 | MiniMax H3（fl2va / ref2va + qwen3vl 32b + 视频 / 音频 VAE，可选 turbo LoRA 加速） | MiniMax H3 Community License：可商用，有附加条件 |
+
+### 模型许可证
+
+Comfy Canva 的许可证只管它自己的代码，你用的每个模型另有许可证，商用前要分别确认。内置工具用到的两个模型限制比较多：
+
+- **Qwen-Image 2.1**：只允许研究和评估用途，商用要另外向模型方申请授权。需要商用的话，文生图和改图可以换用模板库里 Apache 2.0 的 Qwen-Image 2512、Qwen-Image-Edit 2511 或 Z-Image Turbo。
+- **MiniMax H3**：可以商用，但商用产品的界面上要标明"MiniMax H3"，年收入超过 2000 万美元要另外取得授权。它的许可证**不覆盖美国、欧盟、英国和韩国**：在这些地区不能使用这个模型，也不能展示它生成的内容。
+
+模板库里的模型：Z-Image Turbo、Qwen-Image 2512 / Edit 2509 / Edit 2511、Wan 2.2、SeedVR2 是 Apache 2.0；FLUX.2 [dev]、FLUX.2 [klein] 9B、FLUX.1 Kontext [dev] 不能商用；LTX-2.3、Krea 2 是带条件的社区许可。以各模型页面上的许可证原文为准。
 
 ## 常见问题
 
@@ -150,7 +159,7 @@ Comfy Canva 是**源码公开**的项目，采用 [PolyForm Noncommercial Licens
 - **个人和非商业使用免费**：自己创作、学习、研究，以及教育、科研、公益机构
 - **商业使用需要授权**：公司内部使用、集成进收费产品或服务、用它接单等，见 [COMMERCIAL.md](COMMERCIAL.md)
 
-注意：ComfyUI、自定义节点和模型各有自己的许可证，部分模型不允许商用，请分别确认。`presets/` 中的模板来自 ComfyUI 官方模板（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+注意：ComfyUI、自定义节点和模型各有自己的许可证，部分模型不允许商用，见[模型许可证](#模型许可证)。`presets/` 中的模板来自 ComfyUI 官方模板（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 欢迎参与贡献，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -171,4 +180,6 @@ npm install
 npm run dev   # open http://localhost:5173, then set your ComfyUI address in Settings
 ```
 
-**License:** source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other noncommercial use; commercial use requires a license, see [COMMERCIAL.md](COMMERCIAL.md). Models and ComfyUI have their own licenses.
+**License:** source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other noncommercial use; commercial use requires a license, see [COMMERCIAL.md](COMMERCIAL.md).
+
+**Model licenses are separate.** The built-in image tools use Qwen-Image 2.1, which is licensed for research and evaluation only. MiniMax H3 allows commercial use with conditions, but its license does not cover the US, the EU, the UK or South Korea: the model may not be used, nor its outputs displayed, there. Z-Image Turbo, Qwen-Image 2512 / Edit 2511, Wan 2.2 and SeedVR2 are Apache 2.0. Check each model's own license before use.
