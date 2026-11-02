@@ -12,27 +12,34 @@ export const VIDEO_LONG_SIDE = 640;
 
 // ------------------------------------------------------------------ view helpers
 
+/** Board width left of the agent panel, when it is open. */
+function viewWidth() {
+  return get().screen.w - (document.body.classList.contains('agent-open') ? 392 : 0);
+}
+
 /** Pans (and zooms out if needed) so `r` is on screen. */
 export function ensureVisible(r: Rect) {
   const { viewport: v, screen } = get();
+  const width = viewWidth();
   const s = toScreen(v, r);
   const margin = 60;
   const bottomUi = 220;
-  if (s.x >= margin && s.y >= margin && s.x + s.w <= screen.w - margin && s.y + s.h <= screen.h - bottomUi) return;
-  const fits = s.w <= screen.w - margin * 2 && s.h <= screen.h - margin - bottomUi;
+  if (s.x >= margin && s.y >= margin && s.x + s.w <= width - margin && s.y + s.h <= screen.h - bottomUi) return;
+  const fits = s.w <= width - margin * 2 && s.h <= screen.h - margin - bottomUi;
   if (fits) {
-    setViewport({ ...v, x: screen.w / 2 - (r.x + r.w / 2) * v.zoom, y: (screen.h - bottomUi + margin) / 2 - (r.y + r.h / 2) * v.zoom });
+    setViewport({ ...v, x: width / 2 - (r.x + r.w / 2) * v.zoom, y: (screen.h - bottomUi + margin) / 2 - (r.y + r.h / 2) * v.zoom });
   } else {
-    const fit = fitViewport(r, screen.w, screen.h - bottomUi + margin, 60, v.zoom);
+    const fit = fitViewport(r, width, screen.h - bottomUi + margin, 60, v.zoom);
     setViewport({ ...fit, y: fit.y - (bottomUi - margin) / 2 });
   }
 }
 
 export function fitAll() {
   const { items, screen } = get();
+  const width = viewWidth();
   const b = boundsOf(items);
-  if (!b) return setViewport({ x: screen.w / 2, y: screen.h / 2 - 80, zoom: 1 });
-  const fit = fitViewport(b, screen.w, screen.h - 160, 80, 1);
+  if (!b) return setViewport({ x: width / 2, y: screen.h / 2 - 80, zoom: 1 });
+  const fit = fitViewport(b, width, screen.h - 160, 80, 1);
   setViewport({ ...fit, y: fit.y - 60 });
 }
 
@@ -187,7 +194,7 @@ export async function launch({ request, kind, count = 1, size, inputs = [], near
 
 /** Same request with a fresh seed, placed next to the item and linked to the same inputs. */
 export function regenerate(item: CanvasItem) {
-  if (!item.request) return;
+  if (!item.request || item.kind === 'text') return;
   const { seed: _seed, ...request } = item.request;
   const { items } = get();
   const inputs = inputIds(item)
@@ -439,6 +446,18 @@ export async function loadWorkflows() {
 
 // ------------------------------------------------------------------ item utilities
 
+/** A new text note at the center of the view, open for typing. */
+export function addNote() {
+  const { items, viewport, screen } = get();
+  const c = viewportCenter(viewport, screen.w, screen.h - 160);
+  const size = { w: 380, h: 260 };
+  const [pos] = placeRow(items, { x: c.x - size.w / 2, y: c.y - size.h / 2 }, [size]);
+  const note: CanvasItem = { id: nanoid(10), kind: 'text', x: Math.round(pos.x), y: Math.round(pos.y), ...size, name: '', text: '', createdAt: Date.now() };
+  commit([...items, note]);
+  select([note.id]);
+  useStore.setState({ noteEditing: note.id });
+}
+
 export function download(item: CanvasItem) {
   if (!item.asset) return;
   const ext = item.asset.url.split('.').pop();
@@ -450,7 +469,7 @@ export function download(item: CanvasItem) {
 
 export function duplicate(ids: string[]) {
   const { items } = get();
-  const copies = cloneItems(items.filter((i) => ids.includes(i.id) && i.asset), 24, 24);
+  const copies = cloneItems(items.filter((i) => ids.includes(i.id) && (i.asset || i.kind === 'text')), 24, 24);
   if (!copies.length) return;
   commit([...items, ...copies]);
   select(copies.map((c) => c.id));

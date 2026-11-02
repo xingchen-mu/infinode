@@ -1,6 +1,6 @@
-import { Hand, HelpCircle, ImagePlus, MousePointer2, Scan, Workflow } from 'lucide-react';
+import { Hand, HelpCircle, ImagePlus, MousePointer2, Scan, StickyNote, Workflow } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { addFiles, fitAll } from '../lib/actions';
+import { addFiles, addNote, fitAll } from '../lib/actions';
 import { setShowLinks, useStore } from '../store';
 
 const SHORTCUTS: [string, string][] = [
@@ -10,6 +10,7 @@ const SHORTCUTS: [string, string][] = [
   ['V / H', '选择 / 抓手'],
   ['⇧ + 点击', '多选'],
   ['双击图片', '全屏预览'],
+  ['双击文本', '编辑文本'],
   ['⌘Z / ⇧⌘Z', '撤销 / 重做'],
   ['⌘C ⌘V / ⌘D', '复制粘贴 / 复制一份'],
   ['Delete', '删除'],
@@ -37,6 +38,9 @@ export function LeftToolbar() {
       <div className="tool-sep" />
       <button className="tool" title="上传图片或视频" onClick={() => input.current?.click()}>
         <ImagePlus />
+      </button>
+      <button className="tool" title="添加文本（剧本、分镜、备注）" onClick={addNote}>
+        <StickyNote />
       </button>
       <button className="tool" title="显示全部 (⇧1)" onClick={fitAll}>
         <Scan />

@@ -10,7 +10,6 @@ import {
   type Provider,
   type TSchema,
   type TextContent,
-  type ToolCall,
   type ToolResultMessage,
   type UserMessage,
   Type,
@@ -20,18 +19,22 @@ import {
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import type { AgentEntry, AgentEventData, AgentStatus, AgentView } from '../../shared/types.ts';
+import type { AgentEntry, AgentEventData, AgentStatus, AgentView, CanvasItem, Task } from '../../shared/types.ts';
 import { config } from '../config.ts';
 import { RequestError } from '../workflows/index.ts';
 import { type CanvasDeps, ResultWriter, describeItem, readBoard } from './board.ts';
 import { systemPrompt } from './prompt.ts';
-import { type CanvasTool, canvasTools } from './tools.ts';
+import { type CanvasTool, type Json, type ToolContext, canvasTools } from './tools.ts';
 
 const DEFAULT_MODEL = 'deepseek/deepseek-flash';
 const THINKING = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 const ID = /^[\w-]{6,32}$/;
 /** What the page knew at send time, prepended to the user's words; stripped again for the panel. */
 const CONTEXT = /^<canvas_context(?: selection="([^"]*)")?>[\s\S]*?<\/canvas_context>\n*/;
+/** Something that happened without the user typing it (tasks finished, an approval); first line is for the panel. */
+const EVENT = /^<canvas_event>([\s\S]*)<\/canvas_event>$/;
+/** Runs started by finished tasks in a row, before it waits for the user. */
+const MAX_AUTO_RUNS = 40;
 const IMAGE_DROPPED = '[这张图片已从上下文中移除，需要时用 view_images 重新查看]';
 const MAX_MESSAGE = 8000;
 /** Selected items described in full in each message; the rest are listed by id. */
@@ -51,12 +54,24 @@ interface Session {
   /** Streaming text waiting to be pushed (batched, so a fast model does not flood the event stream). */
   textTimer?: NodeJS.Timeout;
   pendingText?: AgentEntry;
+  /** Batches the agent asked to hear about when they finish. */
+  watches: Watch[];
+  /** Runs started by finished tasks since the user last wrote. */
+  autoRuns: number;
+}
+
+interface Watch {
+  what: string;
+  items: { id: string; name?: string; taskId: string }[];
 }
 
 interface ToolDetails {
   summary?: string;
   items?: string[];
+  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected'; payload: Json };
 }
+
+const ACTIVE = new Set(['queued', 'running']);
 
 /** AGENT_BASE_URL: any OpenAI-compatible endpoint (豆包、百炼、Ollama、vLLM…), with AGENT_MODEL naming the model there. */
 function customProvider(baseUrl: string, modelId: string): Provider {
@@ -108,6 +123,8 @@ async function latestImagesOnly(messages: AgentMessage[]): Promise<AgentMessage[
 
 function userEntry(m: UserMessage): AgentEntry {
   const raw = textOf(m.content);
+  const event = EVENT.exec(raw.trim());
+  if (event) return { kind: 'event', id: `u${m.timestamp}`, text: event[1].trim().split('\n')[0], at: m.timestamp };
   const selection = CONTEXT.exec(raw)?.[1]?.split(',').filter(Boolean) ?? [];
   return { kind: 'user', id: `u${m.timestamp}`, text: raw.replace(CONTEXT, ''), ...(selection.length ? { selection } : {}), at: m.timestamp };
 }
@@ -127,6 +144,8 @@ export class AgentHub {
   readonly status: AgentStatus;
   private readonly dir = join(config.dataDir, 'agent');
   private readonly sessions = new Map<string, Promise<Session>>();
+  /** Sessions once open, for task events. */
+  private readonly live = new Map<string, Session>();
   private readonly models: Models;
   private readonly model?: Model<Api>;
   private readonly thinking: ThinkingLevel;
@@ -154,6 +173,7 @@ export class AgentHub {
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
     this.tools = canvasTools(deps, new ResultWriter(deps)).filter((t) => vision || !t.vision);
     this.labels = new Map(this.tools.map((t) => [t.name, t]));
+    deps.tasks.on('task', (t: Task) => this.onTask(t));
     this.status = this.model
       ? { ready: false, model: name, vision, reason: '正在检查模型配置' }
       : { ready: false, model: name, vision, reason: `找不到模型 ${name}：AGENT_MODEL 的格式是 provider/model，比如 ${DEFAULT_MODEL}` };
@@ -183,11 +203,12 @@ export class AgentHub {
     const text = input.text?.trim();
     if (!text) throw new RequestError('请输入内容');
     const s = await this.session(projectId);
+    s.autoRuns = 0;
     const { view } = input;
     if (view && Number.isFinite(view.x) && Number.isFinite(view.y)) s.view = { x: view.x, y: view.y };
     const message: UserMessage = {
       role: 'user',
-      content: (await this.context(projectId, input.selection ?? [])) + text.slice(0, MAX_MESSAGE),
+      content: (await this.boardContext(projectId, input.selection ?? [])) + text.slice(0, MAX_MESSAGE),
       timestamp: Date.now(),
     };
     this.emit({ projectId, entry: userEntry(message) });
@@ -207,10 +228,52 @@ export class AgentHub {
     if (!s) return;
     s.agent.clearAllQueues();
     s.agent.abort();
+    if (s.watches.length) {
+      s.watches = [];
+      this.event(s, '已停止：已提交的任务会继续跑，跑完后助手不会再自动接着做');
+    }
+  }
+
+  /** The user's answer to work a tool held for approval. */
+  async approve(projectId: string, id: string, ok: boolean) {
+    const s = await this.session(projectId);
+    const result = s.agent.state.messages.find((m) => m.role === 'toolResult' && m.toolCallId === id) as ToolResultMessage | undefined;
+    const details = result?.details as ToolDetails | undefined;
+    const approval = details?.approval;
+    if (!result || !details || !approval) throw new RequestError('找不到这个确认请求');
+    if (approval.state !== 'pending') throw new RequestError('这个请求已经处理过了');
+    const tool = this.labels.get(result.toolName);
+    const show = () => this.emit({ projectId, entry: this.resultEntry(id, result.toolName, result, Date.now()) });
+    if (!ok) {
+      approval.state = 'rejected';
+      details.summary = '没有确认';
+      show();
+      await this.save(s);
+      this.wake(s, `用户没有确认「${approval.title}」，什么都没提交。\n先别生成，问问用户想怎么调整。`);
+      return;
+    }
+    if (!tool?.approve) throw new RequestError('这个请求已经不能执行了');
+    approval.state = 'approved';
+    details.summary = '已确认，正在提交…';
+    show();
+    try {
+      const out = await tool.approve(approval.payload, this.context(s));
+      details.summary = out.summary;
+      if (out.items?.length) details.items = out.items;
+    } catch (err) {
+      // Left pending so the user can try again (e.g. once ComfyUI is back).
+      approval.state = 'pending';
+      details.summary = `提交失败：${(err as Error).message}`;
+      throw err;
+    } finally {
+      show();
+      await this.save(s);
+    }
   }
 
   async clear(projectId: string) {
     const s = await this.session(projectId);
+    s.watches = [];
     s.agent.clearAllQueues();
     s.agent.abort();
     // After the run's own save, which would otherwise write the old conversation back.
@@ -226,6 +289,7 @@ export class AgentHub {
     const s = await this.sessions.get(projectId)?.catch(() => undefined);
     s?.agent.abort();
     this.sessions.delete(projectId);
+    this.live.delete(projectId);
     await rm(this.file(projectId), { force: true });
   }
 
@@ -252,7 +316,7 @@ export class AgentHub {
     } catch {
       /* new conversation */
     }
-    const s = { projectId, running: false, interrupt: new AbortController() } as Session;
+    const s = { projectId, running: false, interrupt: new AbortController(), watches: [], autoRuns: 0 } as unknown as Session;
     s.agent = new Agent({
       initialState: {
         systemPrompt: systemPrompt(this.status.vision),
@@ -269,7 +333,88 @@ export class AgentHub {
       sessionId: projectId,
     });
     s.agent.subscribe((e) => this.onEvent(s, e));
+    this.live.set(projectId, s);
     return s;
+  }
+
+  /** What a tool call can reach: the board, the user's view, progress and finish notices. */
+  private context(s: Session, extra: Partial<ToolContext> = {}): ToolContext {
+    return {
+      projectId: s.projectId,
+      view: s.view,
+      interrupt: s.interrupt.signal,
+      notify: (what, items) => this.watch(s, what, items),
+      seen: (ids) => this.unwatch(s, ids),
+      ...extra,
+    };
+  }
+
+  private watch(s: Session, what: string, items: CanvasItem[]) {
+    const tracked = items.filter((i) => i.taskId).map((i) => ({ id: i.id, name: i.name, taskId: i.taskId! }));
+    if (tracked.length) s.watches.push({ what, items: tracked });
+  }
+
+  private unwatch(s: Session, ids: string[]) {
+    const known = new Set(ids);
+    s.watches = s.watches.map((w) => ({ ...w, items: w.items.filter((i) => !known.has(i.id)) })).filter((w) => w.items.length);
+  }
+
+  private onTask(t: Task) {
+    if (ACTIVE.has(t.status)) return;
+    // A wait_for_items call sees the same event and marks its items as seen; let it go first.
+    setTimeout(() => this.checkWatches(t), 500);
+  }
+
+  private checkWatches(t: Task) {
+    for (const s of this.live.values()) {
+      for (const w of s.watches) {
+        if (!w.items.some((i) => i.taskId === t.id)) continue;
+        const tasks = this.deps.tasks.list(w.items.map((i) => i.taskId));
+        if (tasks.some((x) => ACTIVE.has(x.status))) continue;
+        s.watches = s.watches.filter((x) => x !== w);
+        this.finished(s, w, tasks);
+      }
+    }
+  }
+
+  /** A watched batch is over: tell the agent what came out, so it carries on. */
+  private finished(s: Session, w: Watch, tasks: Task[]) {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const label = (i: Watch['items'][number]) => `${i.name ? `${i.name} ` : ''}\`${i.id}\``;
+    const ok = w.items.filter((i) => byId.get(i.taskId)?.status === 'done');
+    const bad = w.items.filter((i) => byId.get(i.taskId)?.status !== 'done');
+    const lines = [
+      `${w.what}都结束了：${ok.length} 个完成${bad.length ? `，${bad.length} 个失败或取消` : ''}。`,
+      ...bad.map((i) => {
+        const t = byId.get(i.taskId);
+        return `- ${label(i)}：${t ? (t.status === 'cancelled' ? '已取消' : (t.error ?? '失败')) : '任务记录丢失'}`;
+      }),
+      ok.length ? `完成的节点：${ok.map(label).join('，')}` : '',
+      '接着做下一步；需要用户决定的事就停下来问。',
+    ];
+    this.wake(s, lines.filter(Boolean).join('\n'));
+  }
+
+  /** Starts (or queues) a run on something the user did not type. */
+  private wake(s: Session, text: string) {
+    if (++s.autoRuns > MAX_AUTO_RUNS) {
+      this.event(s, '自动继续的次数到上限了，先停在这里；说一句「继续」让助手接着做');
+      return;
+    }
+    const message: UserMessage = { role: 'user', content: `<canvas_event>${text}</canvas_event>`, timestamp: Date.now() };
+    this.emit({ projectId: s.projectId, entry: userEntry(message) });
+    if (s.running) {
+      s.agent.followUp(message);
+      return;
+    }
+    s.running = true;
+    this.emit({ projectId: s.projectId, running: true });
+    s.done = this.run(s, message);
+  }
+
+  /** A line in the panel only (not sent to the model). */
+  private event(s: Session, text: string) {
+    this.emit({ projectId: s.projectId, entry: { kind: 'event', id: `n${Date.now()}`, text, at: Date.now() } });
   }
 
   private agentTool(t: CanvasTool, s: Session): AgentTool<TSchema, ToolDetails> {
@@ -279,23 +424,24 @@ export class AgentHub {
       description: t.description,
       parameters: Type.Unsafe(t.parameters as unknown as TSchema),
       execute: async (_id, args, signal, onUpdate) => {
-        const out = await t.run(args as Record<string, unknown>, {
-          projectId: s.projectId,
-          view: s.view,
-          signal,
-          interrupt: s.interrupt.signal,
-          progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: { summary: text } }),
-        });
+        const out = await t.run(
+          args as Record<string, unknown>,
+          this.context(s, { signal, progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: { summary: text } }) }),
+        );
         return {
           content: [{ type: 'text', text: out.text }, ...(out.images ?? []).map((img): ImageContent => ({ type: 'image', ...img }))],
-          details: { summary: out.summary, ...(out.items?.length ? { items: out.items } : {}) },
+          details: {
+            summary: out.summary,
+            ...(out.items?.length ? { items: out.items } : {}),
+            ...(out.approval ? { approval: { ...out.approval, state: 'pending' as const } } : {}),
+          },
         };
       },
     };
   }
 
   /** Board summary and the selected items, as the model sees them. */
-  private async context(projectId: string, selection: string[]): Promise<string> {
+  private async boardContext(projectId: string, selection: string[]): Promise<string> {
     const p = await readBoard(this.deps, projectId);
     const selected = selection.map((id) => p.items.find((i) => i.id === id)).filter((i) => i !== undefined);
     const lines = [`画布「${p.name}」，共 ${p.items.length} 个节点。`];
@@ -335,34 +481,31 @@ export class AgentHub {
     await rename(`${file}.tmp`, file);
   }
 
-  private toolEntry(call: ToolCall, result: ToolResultMessage<ToolDetails> | undefined, running: boolean, at: number): AgentEntry {
-    const t = this.labels.get(call.name);
-    const details = result?.details ?? {};
-    const summary = result
-      ? result.isError
-        ? clip(textOf(result.content), 300)
-        : (details.summary ?? '')
-      : running
-        ? (t?.describe(call.arguments) ?? '')
-        : '没有完成';
-    return {
-      kind: 'tool',
-      id: call.id,
-      tool: call.name,
-      label: t?.label ?? call.name,
-      status: result ? (result.isError ? 'error' : 'done') : running ? 'running' : 'error',
-      summary,
-      ...(details.items?.length ? { items: details.items } : {}),
-      at,
-    };
+  /** A finished tool call as the panel shows it (also used while it still runs: `result` undefined). */
+  private resultEntry(
+    id: string,
+    tool: string,
+    result: { isError: boolean; content: (TextContent | ImageContent)[]; details?: unknown } | undefined,
+    at: number,
+    running = false,
+    args?: unknown,
+  ): AgentEntry {
+    const t = this.labels.get(tool);
+    const details = (result?.details ?? {}) as ToolDetails;
+    const approval = details.approval;
+    const base = { kind: 'tool' as const, id, tool, label: t?.label ?? tool, at, ...(details.items?.length ? { items: details.items } : {}) };
+    if (!result) return { ...base, status: running ? 'running' : 'error', summary: running ? (t?.describe(args as Record<string, unknown>) ?? '') : '没有完成' };
+    if (result.isError) return { ...base, status: 'error', summary: clip(textOf(result.content), 300) };
+    if (approval?.state === 'pending') return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title: approval.title, detail: approval.detail } };
+    return { ...base, status: approval?.state === 'rejected' ? 'error' : 'done', summary: details.summary ?? '' };
   }
 
   /** The panel's view of the transcript. */
   private entries(s: Session): AgentEntry[] {
     const { messages, streamingMessage, pendingToolCalls } = s.agent.state;
     const all = streamingMessage ? [...messages, streamingMessage] : messages;
-    const results = new Map<string, ToolResultMessage<ToolDetails>>();
-    for (const m of all) if (m.role === 'toolResult') results.set(m.toolCallId, m as ToolResultMessage<ToolDetails>);
+    const results = new Map<string, ToolResultMessage>();
+    for (const m of all) if (m.role === 'toolResult') results.set(m.toolCallId, m as ToolResultMessage);
     const out: AgentEntry[] = [];
     for (const m of all) {
       if (m.role === 'user') out.push(userEntry(m));
@@ -370,7 +513,7 @@ export class AgentHub {
       const text = assistantEntry(m);
       if (text) out.push(text);
       for (const c of m.content) {
-        if (c.type === 'toolCall') out.push(this.toolEntry(c, results.get(c.id), m === streamingMessage || pendingToolCalls.has(c.id), m.timestamp));
+        if (c.type === 'toolCall') out.push(this.resultEntry(c.id, c.name, results.get(c.id), m.timestamp, m === streamingMessage || pendingToolCalls.has(c.id), c.arguments));
       }
     }
     return out;
@@ -416,22 +559,9 @@ export class AgentHub {
         emit({ kind: 'tool', id: e.toolCallId, tool: e.toolName, label: t?.label ?? e.toolName, status: 'running', summary, at: Date.now() });
         break;
       }
-      case 'tool_execution_end': {
-        const t = this.labels.get(e.toolName);
-        const details = (e.result?.details ?? {}) as ToolDetails;
-        const summary = e.isError ? clip(textOf(e.result?.content ?? []), 300) : (details.summary ?? '');
-        emit({
-          kind: 'tool',
-          id: e.toolCallId,
-          tool: e.toolName,
-          label: t?.label ?? e.toolName,
-          status: e.isError ? 'error' : 'done',
-          summary,
-          ...(details.items?.length ? { items: details.items } : {}),
-          at: Date.now(),
-        });
+      case 'tool_execution_end':
+        emit(this.resultEntry(e.toolCallId, e.toolName, { isError: e.isError, content: e.result?.content ?? [], details: e.result?.details }, Date.now()));
         break;
-      }
     }
   }
 }

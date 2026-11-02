@@ -60,6 +60,8 @@ export interface State {
   workflows: CustomWorkflow[];
   presets: PresetInfo[];
   modal: Modal;
+  /** Text item open for editing on the board. */
+  noteEditing: string | null;
 }
 
 // Carry over settings saved before the project was renamed from Comfy Canva.
@@ -123,6 +125,7 @@ export const useStore = create<State>(() => ({
   workflows: [],
   presets: [],
   modal: null,
+  noteEditing: null,
 }));
 
 export function setShowLinks(on: boolean) {

@@ -198,7 +198,7 @@ export async function openProject(id: string) {
       projectName: p.name,
       // Placeholders that never got a task (closed mid-submit in an older version) become retryable errors.
       items: resolveItems(
-        p.items.map((i) => (!i.asset && !i.taskId && !i.error ? { ...i, error: '提交未完成，请重试' } : i)),
+        p.items.map((i) => (i.kind !== 'text' && !i.asset && !i.taskId && !i.error ? { ...i, error: '提交未完成，请重试' } : i)),
         tasks,
       ),
       viewport: fresh ? { x: screen.w / 2, y: (screen.h - 160) / 2, zoom: 1 } : p.viewport,

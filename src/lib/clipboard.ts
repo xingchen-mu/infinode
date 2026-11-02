@@ -11,7 +11,7 @@ let pasteCount = 0;
 
 export function copySelection(): boolean {
   const { items, selection } = useStore.getState();
-  const picked = items.filter((i) => selection.includes(i.id) && i.asset);
+  const picked = items.filter((i) => selection.includes(i.id) && (i.asset || i.kind === 'text'));
   if (!picked.length) return false;
   copied = picked.map((i) => ({ ...i }));
   pasteCount = 0;

@@ -2437,31 +2437,6 @@ body.agent-open .panel {
   word-break: break-word;
 }
 
-.agent-text p {
-  margin: 0;
-}
-
-.agent-text p.h {
-  font-weight: 600;
-  margin-top: 4px;
-}
-
-.agent-text p.li {
-  padding-left: 10px;
-}
-
-.agent-text p.gap {
-  height: 6px;
-}
-
-.agent-text code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  background: var(--panel-2);
-  border-radius: 4px;
-  padding: 0 4px;
-}
-
 .agent-error {
   display: flex;
   gap: 6px;
@@ -2657,4 +2632,162 @@ body.agent-open .panel {
   flex: 1;
   font-size: 11.5px;
   color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------- light Markdown (panel and notes) */
+
+.md p {
+  margin: 0;
+}
+
+.md p.h {
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.md p.li {
+  padding-left: 10px;
+}
+
+.md p.gap {
+  height: 6px;
+}
+
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.md table {
+  border-collapse: collapse;
+  margin: 6px 0;
+  width: 100%;
+  font-size: 0.95em;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--border-2);
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.md th {
+  background: var(--panel-2);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- text notes on the board */
+
+.item-note {
+  background: #1b1d22;
+  border: 1px solid var(--border-2);
+}
+
+.note {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.note-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  flex: none;
+}
+
+.note-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.note-body[data-scrollable] {
+  overflow-y: auto;
+}
+
+.note-empty {
+  color: var(--text-3);
+}
+
+.note.editing input.note-title {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 0;
+}
+
+.note-input {
+  flex: 1;
+  resize: none;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------- agent: events and approvals */
+
+.agent-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 2px 4px;
+}
+
+.agent-event svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin-top: 3px;
+  color: var(--warn);
+}
+
+.agent-tool.waiting {
+  border-color: #5a4a2a;
+}
+
+.agent-tool.waiting .agent-tool-icon svg {
+  color: var(--warn);
+}
+
+.agent-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+
+.agent-approval b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.agent-approval-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }

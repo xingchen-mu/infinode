@@ -1,14 +1,24 @@
-import type { ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { nanoid } from 'nanoid';
+import type { CanvasItem, ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
+import { GAP, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
+import { publicAsset } from '../assets.ts';
 import {
+  type BatchJob,
   type CanvasDeps,
   type ResultWriter,
   describeItem,
   findItems,
   inputMedia,
   launch,
+  launchBatch,
+  patchBoard,
   readBoard,
   stateOf,
 } from './board.ts';
+import { concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
 export interface ToolContext {
@@ -20,6 +30,10 @@ export interface ToolContext {
   interrupt?: AbortSignal;
   /** Short progress line for the panel while the call runs. */
   progress?: (text: string) => void;
+  /** Wake the agent with a summary once all these tasks have finished. */
+  notify?: (what: string, items: CanvasItem[]) => void;
+  /** The agent already knows how these items ended (it waited or cancelled): no notice about them. */
+  seen?: (ids: string[]) => void;
 }
 
 export interface ToolOutput {
@@ -30,7 +44,11 @@ export interface ToolOutput {
   summary: string;
   /** Board items to show with the call. */
   items?: string[];
+  /** Hold the work until the user agrees in the panel; then `approve(payload)` runs it. */
+  approval?: { title: string; detail: string; payload: Json };
 }
+
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 /** A canvas operation, independent of the agent runtime (plain JSON Schema parameters). */
 export interface CanvasTool<A = Record<string, unknown>> {
@@ -44,6 +62,8 @@ export interface CanvasTool<A = Record<string, unknown>> {
   /** What a call is doing, from its arguments. */
   describe(args: A): string;
   run(args: A, ctx: ToolContext): Promise<ToolOutput>;
+  /** Does the work `run` asked approval for. */
+  approve?(payload: Json, ctx: ToolContext): Promise<ToolOutput>;
 }
 
 const tool = <A>(t: CanvasTool<A>) => t as unknown as CanvasTool;
@@ -58,6 +78,11 @@ const ids = (description: string, max?: number) => ({
 const clip = (s: string, max = 40) => (s.length > max ? `${s.slice(0, max)}…` : s);
 
 const VIDEO_DURATIONS = [3, 5, 8, 10];
+const snapDuration = (s: number | undefined) => VIDEO_DURATIONS.reduce((best, d) => (Math.abs(d - (Number(s) || 5)) < Math.abs(best - (Number(s) || 5)) ? d : best));
+/** MiniMax H3 on the reference GPU: seconds of GPU per second of video, plus loading the model once. */
+const H3_COST = { '480p': 30, '720p': 66 } as const;
+const H3_WARMUP = 600;
+const MAX_BATCH = 40;
 const MAX_LISTED = 300;
 const VIEWABLE = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
@@ -238,8 +263,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
         const p = await readBoard(deps, ctx.projectId);
         const frames = findItems(p, imageIds);
         const media = inputMedia(deps, frames, 'image');
-        const wanted = Number(args.duration) || 5;
-        const duration = VIDEO_DURATIONS.reduce((best, d) => (Math.abs(d - wanted) < Math.abs(best - wanted) ? d : best));
+        const duration = snapDuration(args.duration);
         const request: TaskRequest = {
           op: 'video.generate',
           model,
@@ -406,6 +430,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
           check();
         });
 
+        ctx.seen?.(final.filter(({ state }) => !isOpen(state)).map(({ item }) => item.id));
         const lines = final.map(({ item, state }) =>
           state.done ? `\`${item.id}\` 完成（${state.media.width}×${state.media.height}）` : `\`${item.id}\` ${state.finished ? state.text : `还没好：${state.text}`}`,
         );
@@ -422,11 +447,333 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
       },
     }),
 
+    tool<{ id?: string; title: string; content: string }>({
+      name: 'write_note',
+      label: '写文本',
+      description:
+        '在画布上新建或更新一个文本节点，用来放剧本、角色设定、分镜表、备注。内容是简单的 Markdown，表格用 | 分隔。' +
+        '更新时传 id，会整段替换。用户可能在画布上改过，改之前先用 read_board 读最新内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '要更新的文本节点 id；不传就新建' },
+          title: { type: 'string' },
+          content: { type: 'string' },
+        },
+        required: ['title', 'content'],
+      },
+      describe: (a) => a.title ?? '',
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const lines = args.content.split('\n').length;
+        const wide = /^\s*\|/m.test(args.content);
+        const size = { w: wide ? 760 : 440, h: Math.min(1400, Math.max(180, 64 + lines * 22)) };
+        if (args.id) {
+          const [item] = findItems(p, [args.id]);
+          if (item.kind !== 'text') throw new Error(`节点 ${args.id} 不是文本节点`);
+          await patchBoard(deps, ctx.projectId, { upsert: [{ ...item, name: args.title.trim() || item.name, text: args.content, h: Math.max(item.h, size.h) }] });
+          return { text: `已更新文本节点 \`${item.id}\``, summary: `更新「${args.title}」`, items: [item.id] };
+        }
+        const bounds = boundsOf(p.items);
+        const start = ctx.view ? { x: ctx.view.x - size.w / 2, y: ctx.view.y - size.h / 2 } : bounds ? { x: bounds.x - size.w - GAP * 3, y: bounds.y } : { x: 0, y: 0 };
+        const [pos] = placeRow(p.items, start, [size]);
+        const note: CanvasItem = { id: nanoid(10), kind: 'text', x: Math.round(pos.x), y: Math.round(pos.y), ...size, name: args.title.trim(), text: args.content, createdAt: Date.now() };
+        await patchBoard(deps, ctx.projectId, { upsert: [note] });
+        return { text: `已新建文本节点 \`${note.id}\`「${note.name}」`, summary: `「${args.title}」`, items: [note.id] };
+      },
+    }),
+
+    tool<{ jobs: { prompt: string; reference_ids?: string[]; aspect?: string; name?: string }[]; model?: ImageModel; quality?: '1k' | '2k'; layout?: 'row' | 'column' }>({
+      name: 'batch_generate_images',
+      label: '批量出图',
+      description:
+        `一次提交多张图（最多 ${MAX_BATCH} 张），每张有自己的提示词和参考图（规则同 generate_image）。新节点按顺序排成一行或一列。` +
+        '提交后立刻返回；这一批全部结束时，你会自动收到一条通知，不用 wait_for_items。分镜关键帧用 layout=column（按镜头顺序从上到下），name 写镜头编号。',
+      parameters: {
+        type: 'object',
+        properties: {
+          jobs: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_BATCH,
+            items: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string' },
+                reference_ids: ids('参考图节点 id（只有 qwen 支持，最多 10 张）', 10),
+                aspect: { type: 'string', description: '如 16:9、9:16、1:1；auto = 跟第一张参考图一样' },
+                name: { type: 'string', description: '节点名称，如 S01 或「程诺 · 全身」' },
+              },
+              required: ['prompt'],
+            },
+          },
+          model: { type: 'string', enum: ['qwen', 'zimage'] },
+          quality: { type: 'string', enum: ['1k', '2k'], description: '默认 1k' },
+          layout: { type: 'string', enum: ['row', 'column'], description: '默认 row' },
+        },
+        required: ['jobs'],
+      },
+      describe: (a) => `${a.jobs?.length ?? 0} 张`,
+      async run(args, ctx) {
+        const model: ImageModel = args.model === 'zimage' ? 'zimage' : 'qwen';
+        const p = await readBoard(deps, ctx.projectId);
+        // Check every job before queueing any, so a bad id does not leave half a batch.
+        const jobs: BatchJob[] = args.jobs.slice(0, MAX_BATCH).map((j, n) => {
+          const refIds = j.reference_ids ?? [];
+          if (model === 'zimage' && refIds.length) throw new Error(`第 ${n + 1} 张：zimage 不支持参考图`);
+          const refs = findItems(p, refIds.slice(0, 10));
+          const media = inputMedia(deps, refs, 'image');
+          return {
+            request: {
+              op: 'image.generate',
+              model,
+              prompt: j.prompt,
+              aspect: j.aspect?.trim() || (refs.length ? 'auto' : '1:1'),
+              quality: args.quality === '2k' ? '2k' : '1k',
+              images: media.map((m) => m.id),
+            },
+            inputs: refs,
+            name: j.name,
+          };
+        });
+        const { items, failed } = await launchBatch(deps, writer, ctx.projectId, jobs, { layout: args.layout === 'column' ? 'column' : 'row', view: ctx.view });
+        if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
+        ctx.notify?.(`${items.length} 张图片`, items);
+        const list = items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('\n');
+        const errors = failed.map((f) => `第 ${f.index + 1} 张提交失败：${f.error}`).join('\n');
+        return {
+          text: `已提交 ${items.length} 张：\n${list}${errors ? `\n${errors}` : ''}\n全部结束时你会收到通知。`,
+          summary: `${items.length} 张已提交${failed.length ? `，${failed.length} 张失败` : ''}`,
+          items: items.map((i) => i.id),
+        };
+      },
+    }),
+
+    tool<{ jobs: { prompt: string; first_frame_id: string; last_frame_id?: string; duration?: number; name?: string }[]; quality?: '480p' | '720p' }>({
+      name: 'batch_generate_videos',
+      label: '批量出视频',
+      description:
+        `一次提交多段图生视频（MiniMax H3，最多 ${MAX_BATCH} 段），每段从自己的首帧图开始，可选尾帧；视频放在首帧右边。` +
+        '这一步很耗 GPU，会先在面板上请用户确认：调用后告诉用户在等他确认，然后结束这一轮；用户确认后会自动提交，全部结束时你会收到通知。',
+      parameters: {
+        type: 'object',
+        properties: {
+          jobs: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_BATCH,
+            items: {
+              type: 'object',
+              properties: {
+                prompt: { type: 'string' },
+                first_frame_id: { type: 'string', description: '首帧图片节点 id' },
+                last_frame_id: { type: 'string', description: '尾帧图片节点 id（可选）' },
+                duration: { type: 'integer', enum: VIDEO_DURATIONS, description: '秒数，默认 5；镜头短也生成 5 秒，剪辑时再裁' },
+                name: { type: 'string', description: '节点名称，如 S01' },
+              },
+              required: ['prompt', 'first_frame_id'],
+            },
+          },
+          quality: { type: 'string', enum: ['480p', '720p'], description: '默认 480p' },
+        },
+        required: ['jobs'],
+      },
+      describe: (a) => `${a.jobs?.length ?? 0} 段`,
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const quality = args.quality === '720p' ? '720p' : '480p';
+        const jobs = args.jobs.slice(0, MAX_BATCH).map((j) => {
+          const frames = findItems(p, [j.first_frame_id, ...(j.last_frame_id ? [j.last_frame_id] : [])]);
+          inputMedia(deps, frames, 'image');
+          return { prompt: j.prompt, frames: frames.map((f) => f.id), duration: snapDuration(j.duration), name: j.name ?? null };
+        });
+        const seconds = jobs.reduce((n, j) => n + j.duration, 0);
+        const minutes = Math.ceil((seconds * H3_COST[quality] + H3_WARMUP) / 60);
+        return {
+          text: `已在面板上请用户确认：${jobs.length} 段、共 ${seconds} 秒、${quality}，预计 GPU 约 ${minutes} 分钟。用户确认后会自动提交，全部结束时你会收到通知。现在告诉用户在等他确认，然后结束这一轮。`,
+          summary: '等待确认',
+          approval: {
+            title: `生成 ${jobs.length} 段视频`,
+            detail: `共 ${seconds} 秒 · ${quality} · 预计 GPU 约 ${minutes} 分钟（期间其他生成任务要排队）`,
+            payload: { quality, jobs },
+          },
+        };
+      },
+      async approve(payload, ctx) {
+        const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
+        const p = await readBoard(deps, ctx.projectId);
+        const batch: BatchJob[] = jobs.map((j) => {
+          const frames = findItems(p, j.frames);
+          const media = inputMedia(deps, frames, 'image');
+          const first = frames[0];
+          return {
+            request: { op: 'video.generate', model: 'minimax', prompt: j.prompt, aspect: 'auto', quality, duration: j.duration, images: media.map((m) => m.id) },
+            inputs: frames,
+            name: j.name ?? undefined,
+            // Same height as its frame, so the storyboard keeps one row per shot.
+            size: { w: Math.round(first.h * (media[0].width / media[0].height)), h: first.h },
+          };
+        });
+        const { items, failed } = await launchBatch(deps, writer, ctx.projectId, batch, { layout: 'beside', view: ctx.view });
+        if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
+        ctx.notify?.(`用户确认后提交的 ${items.length} 段视频`, items);
+        return {
+          text: `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}`,
+          summary: `${items.length} 段已提交${failed.length ? `，${failed.length} 段失败：${failed[0].error}` : ''}`,
+          items: items.map((i) => i.id),
+        };
+      },
+    }),
+
     tool<{ ids: string[] }>({
+      name: 'review_items',
+      label: '审片',
+      vision: true,
+      description: '把最多 16 个图片或视频节点拼成一张带编号的拼图来检查（视频取第 1 秒的画面）。比 view_images 省，适合整批检查人物是否一致、有没有多余的人、背景对不对。',
+      parameters: { type: 'object', properties: { ids: { ...ids('节点 id', 16), minItems: 1 } }, required: ['ids'] },
+      describe: (a) => `${a.ids?.length ?? 0} 个`,
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const items = findItems(p, args.ids.slice(0, 16));
+        const frames: (Buffer | string)[] = [];
+        const lines: string[] = [];
+        const skipped: string[] = [];
+        for (const item of items) {
+          const state = stateOf(deps, item);
+          const stored = state.done ? deps.assets.get(state.media.id) : undefined;
+          if (!state.done || !stored) {
+            skipped.push(`\`${item.id}\`（${state.done ? '文件不见了' : state.text}）`);
+            continue;
+          }
+          const path = deps.assets.path(stored);
+          frames.push(stored.kind === 'video' ? await videoFrame(path, 1) : path);
+          lines.push(`${frames.length} = ${describeItem(deps, item, 120)}`);
+        }
+        if (!frames.length) throw new Error(`没有可看的画面：${skipped.join('、')}`);
+        const sheet = await contactSheet(frames);
+        return {
+          text: `拼图里的编号：\n${lines.join('\n')}${skipped.length ? `\n跳过：${skipped.join('、')}` : ''}`,
+          images: [{ data: sheet.toString('base64'), mimeType: 'image/jpeg' }],
+          summary: `${frames.length} 个`,
+          items: items.map((i) => i.id),
+        };
+      },
+    }),
+
+    tool<{ ids: string[] }>({
+      name: 'inspect_clips',
+      label: '听声音',
+      description:
+        '查看视频节点的时长，以及哪几秒有明显的声音（生成的镜头里通常就是台词；环境声很轻，不算）。剪辑前用它决定每段裁到哪里：台词常常在镜头后半段才说，别按分镜秒数直接裁掉。',
+      parameters: { type: 'object', properties: { ids: { ...ids('视频节点 id', 40), minItems: 1 } }, required: ['ids'] },
+      describe: (a) => `${a.ids?.length ?? 0} 段`,
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const items = findItems(p, args.ids);
+        const media = inputMedia(deps, items, 'video');
+        const lines: string[] = [];
+        for (const [i, m] of media.entries()) {
+          const stored = deps.assets.get(m.id);
+          if (!stored) throw new Error(`节点 ${items[i].id} 的视频文件不见了`);
+          const path = deps.assets.path(stored);
+          const info = await probe(path);
+          const spans = info.hasAudio ? await soundSpans(path, info.duration) : [];
+          const sound = !info.hasAudio ? '没有音轨' : spans.length ? `明显的声音在 ${spans.map((s) => `${s.start.toFixed(2)}–${s.end.toFixed(2)}`).join('、')} 秒` : '只有很轻的环境声，没有台词';
+          lines.push(`\`${items[i].id}\`${items[i].name ? ` ${items[i].name}` : ''}：${info.duration.toFixed(2)} 秒；${sound}`);
+        }
+        return { text: lines.join('\n'), summary: `${items.length} 段`, items: items.map((i) => i.id) };
+      },
+    }),
+
+    tool<{ clips: { id: string; start?: number; end?: number }[]; name?: string }>({
+      name: 'assemble_video',
+      label: '剪辑成片',
+      description:
+        '按顺序把视频节点拼成一条成片（硬切），每段可以裁头尾（start/end 是这段里的秒数）。保留每段自带的声音。成片放在画布上，连回每一段。在运行服务的电脑上用 ffmpeg 处理，几十秒到几分钟。',
+      parameters: {
+        type: 'object',
+        properties: {
+          clips: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 80,
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, start: { type: 'number' }, end: { type: 'number' } },
+              required: ['id'],
+            },
+          },
+          name: { type: 'string', description: '成片名称' },
+        },
+        required: ['clips'],
+      },
+      describe: (a) => `${a.clips?.length ?? 0} 段`,
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const items = findItems(p, args.clips.map((c) => c.id));
+        const media = inputMedia(deps, items, 'video');
+        const clips = media.map((m, i) => {
+          const stored = deps.assets.get(m.id);
+          if (!stored) throw new Error(`节点 ${items[i].id} 的视频文件不见了`);
+          return { path: deps.assets.path(stored), start: args.clips[i].start, end: args.clips[i].end };
+        });
+        // Speech that the trims would cut off: reported, so the model can fix the edit.
+        const cutOff: string[] = [];
+        for (const [i, c] of clips.entries()) {
+          const info = await probe(c.path);
+          if (!info.hasAudio) continue;
+          const from = c.start ?? 0;
+          const to = Math.min(info.duration, c.end ?? info.duration);
+          for (const s of await soundSpans(c.path, info.duration)) {
+            const lost = Math.max(0, Math.min(s.end, from) - s.start) + Math.max(0, s.end - Math.max(s.start, to));
+            if (lost >= 0.3) cutOff.push(`${items[i].name ?? items[i].id} 的 ${s.start.toFixed(2)}–${s.end.toFixed(2)} 秒有明显的声音（可能是台词），保留的是 ${from}–${to.toFixed(2)} 秒`);
+          }
+        }
+        ctx.progress?.(`剪辑 ${clips.length} 段…`);
+        const dir = await mkdtemp(join(tmpdir(), 'infinode-cut-'));
+        try {
+          const out = join(dir, 'cut.mp4');
+          await concatClips(clips, out, ctx.signal);
+          const info = await probe(out);
+          const name = args.name?.trim().slice(0, 60) || '成片';
+          const asset = await deps.assets.save(await readFile(out), { filename: 'cut.mp4', mime: 'video/mp4', size: { width: info.width, height: info.height }, name });
+          const fresh = await readBoard(deps, ctx.projectId);
+          const b = boundsOf(items)!;
+          const size = displaySize(info.width, info.height, 960);
+          const [pos] = placeRow(fresh.items, { x: b.x + b.w + GAP * 4, y: b.y + (b.h - size.h) / 2 }, [size]);
+          const item: CanvasItem = {
+            id: nanoid(10),
+            kind: 'video',
+            x: Math.round(pos.x),
+            y: Math.round(pos.y),
+            ...size,
+            asset: publicAsset(asset),
+            inputs: [...new Set(items.map((i) => i.id))],
+            name,
+            createdAt: Date.now(),
+          };
+          await patchBoard(deps, ctx.projectId, { upsert: [item] });
+          const warning = cutOff.length ? `\n注意，这些声音被裁掉了：\n${cutOff.map((w) => `- ${w}`).join('\n')}\n如果是台词，调整裁剪范围后重新剪一版。` : '';
+          return {
+            text: `成片 \`${item.id}\`：${clips.length} 段，${info.duration.toFixed(1)} 秒，${info.width}×${info.height}${warning}`,
+            summary: `${info.duration.toFixed(1)} 秒${cutOff.length ? `，有 ${cutOff.length} 处声音被裁掉` : ''}`,
+            items: [item.id],
+          };
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      },
+    }),
+
+    tool<{ ids: string[]; remove?: boolean }>({
       name: 'cancel_items',
       label: '取消生成',
-      description: '取消这些节点还在排队或生成中的任务。',
-      parameters: { type: 'object', properties: { ids: { ...ids('节点 id'), minItems: 1 } }, required: ['ids'] },
+      description: '取消这些节点还在排队或生成中的任务。remove=true 时顺便把这些占位节点从画布上删掉（只删还没有结果的，已经生成好的图和视频不会删）。',
+      parameters: {
+        type: 'object',
+        properties: { ids: { ...ids('节点 id'), minItems: 1 }, remove: { type: 'boolean', description: '同时删掉这些占位节点，默认 false' } },
+        required: ['ids'],
+      },
       describe: (a) => `${a.ids?.length ?? 0} 个节点`,
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
@@ -439,10 +786,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
           await deps.tasks.cancel(item.taskId);
           cancelled.push(item.id);
         }
+        ctx.seen?.(items.map((i) => i.id));
+        const removable = args.remove ? items.filter((i) => i.kind !== 'text' && !stateOf(deps, i).done).map((i) => i.id) : [];
+        if (removable.length) await patchBoard(deps, ctx.projectId, { remove: removable });
         return {
-          text: cancelled.length ? `已取消：${cancelled.map((id) => `\`${id}\``).join(' ')}` : '这些节点没有进行中的任务',
-          summary: `取消了 ${cancelled.length} 个`,
-          items: cancelled,
+          text: (cancelled.length ? `已取消：${cancelled.map((id) => `\`${id}\``).join(' ')}` : '这些节点没有进行中的任务') + (removable.length ? `；已从画布删掉 ${removable.length} 个占位` : ''),
+          summary: `取消了 ${cancelled.length} 个${removable.length ? `，删掉 ${removable.length} 个占位` : ''}`,
+          items: cancelled.filter((id) => !removable.includes(id)),
         };
       },
     }),

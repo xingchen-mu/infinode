@@ -1,4 +1,4 @@
-import { Brush, Camera, Clapperboard, Download, Eraser, Expand, Maximize2, Puzzle, RefreshCw, Scissors, Sparkles, Trash2 } from 'lucide-react';
+import { Brush, Camera, Clapperboard, Download, Eraser, Expand, Maximize2, Pencil, Puzzle, RefreshCw, Scissors, Sparkles, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { CanvasItem, WorkflowLike } from '../../shared/types';
 import { captureFrame, download, promptOptional, regenerate, removeBackground, runWorkflow, upscale } from '../lib/actions';
@@ -57,8 +57,20 @@ export function ItemToolbar() {
   const caps = useStore((s) => s.caps);
   const [upscaleOpen, setUpscaleOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const noteEditing = useStore((s) => s.noteEditing);
   if (selection.length !== 1) return null;
   const item = items.find((i) => i.id === selection[0]);
+  if (item?.kind === 'text' && noteEditing !== item.id) {
+    const s = toScreen(viewport, item);
+    const top = s.y - 56 >= 64 ? s.y - 56 : s.y + s.h + 14;
+    if (top > screen.h - 120 || s.x + s.w < 0 || s.x > screen.w) return null;
+    return (
+      <div className="item-toolbar" data-ui style={{ left: Math.min(Math.max(s.x + s.w / 2, 90), screen.w - 90), top }} onPointerDown={(e) => e.stopPropagation()}>
+        <Btn icon={<Pencil />} label="编辑" title="编辑文本（双击也可以）" onClick={() => useStore.setState({ noteEditing: item.id })} />
+        <Btn icon={<Trash2 />} title="删除" danger onClick={() => removeItems([item.id])} />
+      </div>
+    );
+  }
   if (!item?.asset) return null;
   // Imported workflows and runnable presets that take this kind of item as input.
   const takes = (w: WorkflowLike) => w.inputs.some((i) => i.type === (item.kind === 'video' ? 'video' : 'image'));

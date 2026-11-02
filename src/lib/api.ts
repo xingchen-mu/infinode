@@ -118,6 +118,7 @@ export const api = {
     request<{ ok: true }>(`/api/agent/${projectId}`, json('POST', body)),
   abortAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}/abort`, { method: 'POST' }),
   clearAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}`, { method: 'DELETE' }),
+  approveAgent: (projectId: string, id: string, ok: boolean) => request<{ ok: true }>(`/api/agent/${projectId}/approve`, json('POST', { id, ok })),
 };
 
 export interface EventHandlers {

@@ -471,6 +471,12 @@ app.post('/api/agent/:projectId/abort', async (c) => {
   await agent.abort(c.req.param('projectId'));
   return c.json({ ok: true });
 });
+app.post('/api/agent/:projectId/approve', async (c) => {
+  const body = await c.req.json<{ id?: unknown; ok?: unknown }>();
+  if (typeof body.id !== 'string') throw new RequestError('请求格式错误');
+  await agent.approve(c.req.param('projectId'), body.id, body.ok === true);
+  return c.json({ ok: true });
+});
 app.delete('/api/agent/:projectId', async (c) => {
   await agent.clear(c.req.param('projectId'));
   return c.json({ ok: true });

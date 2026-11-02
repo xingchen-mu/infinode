@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { AssetInfo, CanvasItem, Capabilities, MediaKind, Project, Task, TaskRequest, WorkflowLike } from '../../shared/types.ts';
-import { GAP, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
+import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
 import type { AssetStore } from '../assets.ts';
 import type { ItemsPatch, ProjectStore } from '../projects.ts';
 import type { TaskManager } from '../tasks.ts';
@@ -72,8 +72,14 @@ function clip(s: string, max: number) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-/** One line per item for the model: id, kind, name, state, links and prompt. */
+/** One line per item for the model: id, kind, name, state, links and prompt (or a note's text). */
 export function describeItem(deps: CanvasDeps, item: CanvasItem, promptChars = 80): string {
+  if (item.kind === 'text') {
+    const text = item.text?.trim() ?? '';
+    return [`\`${item.id}\` 文本`, item.name ? `「${clip(item.name, 40)}」` : '', text ? `内容：${promptChars > 1000 ? text : clip(text, promptChars)}` : '（空）']
+      .filter(Boolean)
+      .join(' · ');
+  }
   const state = stateOf(deps, item);
   const parts = [`\`${item.id}\` ${item.kind === 'video' ? '视频' : '图片'}`];
   if (item.name) parts.push(`「${clip(item.name, 40)}」`);
@@ -116,60 +122,105 @@ export async function ensureRunnable(deps: CanvasDeps, request: TaskRequest) {
   if (missing.length) throw new Error(`ComfyUI 服务器缺少：${missing.join('、')}`);
 }
 
+export interface BatchJob {
+  request: TaskRequest;
+  /** Board items used as inputs, in request order (drawn as links). */
+  inputs: CanvasItem[];
+  name?: string;
+  /** Placeholder size; by default from the output size. */
+  size?: { w: number; h: number };
+}
+
 /**
- * Queues `count` runs of a request and puts a placeholder for each on the board, beside its first
- * input (or where the user was looking), linked to its inputs. The page fills them in as they finish.
+ * How a batch is placed: `row` / `column` as one block (beside the first job's first input, else where
+ * the user looks), `beside`: each placeholder right of its own first input (e.g. a video beside its frame).
  */
+export type BatchLayout = 'row' | 'column' | 'beside';
+
+/**
+ * Queues each job and puts a placeholder for it on the board, linked to its inputs. The page fills
+ * them in as they finish. Jobs that fail to queue are reported, not placed.
+ */
+export async function launchBatch(
+  deps: CanvasDeps,
+  writer: ResultWriter,
+  projectId: string,
+  jobs: BatchJob[],
+  opts: { layout: BatchLayout; view?: { x: number; y: number } },
+): Promise<{ items: CanvasItem[]; failed: { index: number; error: string }[] }> {
+  for (const key of new Set(jobs.map((j) => featureKey(j.request)))) await ensureRunnable(deps, jobs.find((j) => featureKey(j.request) === key)!.request);
+  const created: { job: BatchJob; task: Task }[] = [];
+  const failed: { index: number; error: string }[] = [];
+  for (const [index, job] of jobs.entries()) {
+    try {
+      created.push({ job, task: await deps.tasks.create(job.request) });
+    } catch (err) {
+      failed.push({ index, error: (err as Error).message });
+    }
+  }
+  if (!created.length) return { items: [], failed };
+
+  const project = await readBoard(deps, projectId);
+  const sizes = created.map(({ job, task }) => job.size ?? displaySize(task.expected.width, task.expected.height, LONG_SIDE[task.expected.kind]));
+  const bounds = boundsOf(project.items);
+  const fallback = (w: number, h: number) =>
+    opts.view ? { x: opts.view.x - w / 2, y: opts.view.y - h / 2 } : bounds ? { x: bounds.x + bounds.w + GAP * 3, y: bounds.y } : { x: 0, y: 0 };
+  let positions: { x: number; y: number }[];
+  if (opts.layout === 'beside') {
+    const taken: Rect[] = [...project.items];
+    positions = created.map(({ job }, i) => {
+      const a = job.inputs[0];
+      const start = a ? { x: a.x + a.w + GAP * 3, y: a.y + (a.h - sizes[i].h) / 2 } : fallback(sizes[i].w, sizes[i].h);
+      const [p] = placeRow(taken as CanvasItem[], start, [sizes[i]]);
+      taken.push({ ...p, ...sizes[i] });
+      return p;
+    });
+  } else {
+    const row = opts.layout === 'row';
+    const blockW = row ? sizes.reduce((n, r) => n + r.w, 0) + GAP * (sizes.length - 1) : Math.max(...sizes.map((r) => r.w));
+    const blockH = row ? Math.max(...sizes.map((r) => r.h)) : sizes.reduce((n, r) => n + r.h, 0) + GAP * (sizes.length - 1);
+    const a = created[0].job.inputs[0];
+    const start = a ? { x: a.x + a.w + GAP * 3, y: row ? a.y + (a.h - blockH) / 2 : a.y } : fallback(blockW, blockH);
+    const [origin] = placeRow(project.items, start, [{ w: blockW, h: blockH }]);
+    let offset = 0;
+    positions = sizes.map((r) => {
+      const p = row ? { x: origin.x + offset, y: origin.y + (blockH - r.h) / 2 } : { x: origin.x, y: origin.y + offset };
+      offset += (row ? r.w : r.h) + GAP;
+      return p;
+    });
+  }
+
+  const now = Date.now();
+  const items: CanvasItem[] = created.map(({ job, task }, i) => ({
+    id: nanoid(10),
+    kind: task.expected.kind,
+    x: Math.round(positions[i].x),
+    y: Math.round(positions[i].y),
+    w: Math.round(sizes[i].w),
+    h: Math.round(sizes[i].h),
+    taskId: task.id,
+    resultIndex: 0,
+    request: job.request,
+    inputs: job.inputs.length ? job.inputs.map((it) => it.id) : undefined,
+    name: job.name?.trim().slice(0, 60) || undefined,
+    createdAt: now,
+  }));
+  await patchBoard(deps, projectId, { upsert: items });
+  writer.track(projectId, items);
+  return { items, failed };
+}
+
+/** `count` runs of one request, side by side beside its first input. */
 export async function launch(
   deps: CanvasDeps,
   writer: ResultWriter,
   projectId: string,
   opts: { request: TaskRequest; count: number; inputs: CanvasItem[]; name?: string; view?: { x: number; y: number } },
 ): Promise<{ items: CanvasItem[]; error?: string }> {
-  await ensureRunnable(deps, opts.request);
-  const tasks: Task[] = [];
-  let error: string | undefined;
-  for (let i = 0; i < opts.count; i++) {
-    try {
-      tasks.push(await deps.tasks.create(opts.request));
-    } catch (err) {
-      // Keep what was already queued on the board; report the rest.
-      if (!tasks.length) throw err;
-      error = (err as Error).message;
-      break;
-    }
-  }
-  const project = await readBoard(deps, projectId);
-  const sizes = tasks.map((t) => displaySize(t.expected.width, t.expected.height, LONG_SIDE[t.expected.kind]));
-  const rowW = sizes.reduce((s, r) => s + r.w, 0) + GAP * (sizes.length - 1);
-  const anchor = opts.inputs[0];
-  const bounds = boundsOf(project.items);
-  const start = anchor
-    ? { x: anchor.x + anchor.w + GAP * 3, y: anchor.y + (anchor.h - sizes[0].h) / 2 }
-    : opts.view
-      ? { x: opts.view.x - rowW / 2, y: opts.view.y - sizes[0].h / 2 }
-      : bounds
-        ? { x: bounds.x + bounds.w + GAP * 3, y: bounds.y }
-        : { x: 0, y: 0 };
-  const positions = placeRow(project.items, start, sizes);
-  const now = Date.now();
-  const items: CanvasItem[] = tasks.map((task, i) => ({
-    id: nanoid(10),
-    kind: task.expected.kind,
-    x: Math.round(positions[i].x),
-    y: Math.round(positions[i].y),
-    w: sizes[i].w,
-    h: sizes[i].h,
-    taskId: task.id,
-    resultIndex: 0,
-    request: opts.request,
-    inputs: opts.inputs.length ? opts.inputs.map((i) => i.id) : undefined,
-    name: opts.name?.trim().slice(0, 60) || undefined,
-    createdAt: now,
-  }));
-  await patchBoard(deps, projectId, { upsert: items });
-  writer.track(projectId, items);
-  return { items, error };
+  const jobs = Array.from({ length: opts.count }, () => ({ request: opts.request, inputs: opts.inputs, name: opts.name }));
+  const { items, failed } = await launchBatch(deps, writer, projectId, jobs, { layout: 'row', view: opts.view });
+  if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
+  return { items, error: failed[0]?.error };
 }
 
 /** A placeholder with its finished task's result (or error) filled in, as the page does it. */

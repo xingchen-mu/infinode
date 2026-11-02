@@ -3,7 +3,8 @@ import { memo, useEffect, useRef, useState } from 'react';
 import type { CanvasItem, Task } from '../../shared/types';
 import { cancel, retry } from '../lib/actions';
 import { api } from '../lib/api';
-import { patchItem, removeItems } from '../store';
+import { patchItem, removeItems, updateItems, useStore } from '../store';
+import { Markdown } from '../ui/Markdown';
 
 function Elapsed({ since }: { since: number }) {
   const [, tick] = useState(0);
@@ -98,7 +99,54 @@ function VideoView({ item }: { item: CanvasItem }) {
   );
 }
 
+function NoteEditor({ item }: { item: CanvasItem }) {
+  const [title, setTitle] = useState(item.name ?? '');
+  const [text, setText] = useState(item.text ?? '');
+  const done = () => {
+    useStore.setState({ noteEditing: null });
+    const name = title.trim() || undefined;
+    if (name === item.name && text === (item.text ?? '')) return;
+    updateItems((items) => items.map((i) => (i.id === item.id ? { ...i, name, text } : i)));
+  };
+  return (
+    <div
+      className="note editing"
+      data-ui
+      onPointerDown={(e) => e.stopPropagation()}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) done();
+      }}
+    >
+      <input className="note-title" value={title} placeholder="标题" onChange={(e) => setTitle(e.target.value)} />
+      <textarea className="note-input" data-scrollable autoFocus value={text} placeholder="写点什么：剧本、分镜、备注…" onChange={(e) => setText(e.target.value)} />
+    </div>
+  );
+}
+
+/** A text item: title and light Markdown; double-click to edit. */
+function NoteView({ item }: { item: CanvasItem }) {
+  const editing = useStore((s) => s.noteEditing === item.id);
+  const selected = useStore((s) => s.selection.includes(item.id));
+  if (editing) return <NoteEditor item={item} />;
+  return (
+    <div className="note">
+      {item.name && <div className="note-title">{item.name}</div>}
+      {/* Scrolls (instead of panning the board) only once selected. */}
+      <div className="note-body" {...(selected ? { 'data-scrollable': true } : {})}>
+        {item.text ? <Markdown text={item.text} /> : <span className="note-empty">双击编辑</span>}
+      </div>
+    </div>
+  );
+}
+
 export const ItemView = memo(function ItemView({ item, task }: { item: CanvasItem; task?: Task }) {
+  if (item.kind === 'text') {
+    return (
+      <div className="item item-note" data-item-id={item.id} style={{ transform: `translate(${item.x}px, ${item.y}px)`, width: item.w, height: item.h }}>
+        <NoteView item={item} />
+      </div>
+    );
+  }
   return (
     <div
       className={`item ${item.asset ? '' : 'item-pending'}`}

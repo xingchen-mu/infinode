@@ -35,7 +35,8 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - **导入你自己的工作流**：ComfyUI 里「导出 (API)」得到的 JSON 拖进来，自动识别提示词、图片输入、种子、尺寸和参数，导入后就是画布上的新工具
 - **本地部署**：页面和数据都在你自己的机器上；ComfyUI 可以在本机、局域网或远程服务器（支持自动 SSH 隧道）
 - **实时进度**：排队位置、当前阶段、进度条、已用时间，可随时取消，失败一键重试
-- **画布助手**：右上角「助手」打开对话面板，用一句话让它读画布、看图、出图、出视频、运行你的工作流，结果照样连线；模型可用 DeepSeek 等，也可接任意 OpenAI 兼容接口
+- **画布助手**：右上角「助手」打开对话面板，用一句话让它读画布、看图、出图、出视频、运行你的工作流，结果照样连线；还能从一句话做到一条多镜头短剧（剧本 → 分镜 → 设定图 → 关键帧 → 视频 → 剪辑成片）。模型可用 DeepSeek 等，也可接任意 OpenAI 兼容接口
+- **文本节点**：剧本、分镜表、备注直接放在画布上，双击编辑
 
 <table>
 <tr>
@@ -96,6 +97,7 @@ Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的�
 | 连线 | 悬停或选中图片高亮它的连线；`L` 显示 / 隐藏全部连线 |
 | 其他 | `⌘Z` 撤销、`⌘D` 复制一份、`Delete` 删除、`⇧1` 显示全部、`/` 聚焦输入框 |
 | 画布助手 | 右上角「助手」，用一句话说要做什么；发送时会带上画布上选中的节点 |
+| 文本 | 左侧工具栏「添加文本」，双击编辑；支持简单的 Markdown 和表格 |
 
 ### 画布助手
 
@@ -110,7 +112,9 @@ DEEPSEEK_API_KEY=sk-...                 # 默认模型 deepseek/deepseek-flash�
 # AGENT_API_KEY=...
 ```
 
-助手会把画布概况（节点名称、提示词）和它查看的图片发给你配置的模型服务。key 只保存在你的机器上；把画布共享到局域网时，助手也只能在运行服务的那台电脑上使用。
+助手会把画布概况（节点名称、提示词、文本内容）和它查看的图片发给你配置的模型服务。key 只保存在你的机器上；把画布共享到局域网时，助手也只能在运行服务的那台电脑上使用。
+
+**做短剧**：跟助手说故事和镜头，比如「做一个两个镜头的小短剧：…」。它会先把剧本和分镜表写成画布上的文本节点给你看，你认可后依次出角色设定图、场景图、每个镜头的关键帧（自己拼图检查一遍），再每个镜头生成一段视频，最后按分镜的秒数裁剪拼成成片。每一批跑完它会自动接着做，页面关了也照样进行；批量生成视频前会在面板上弹出确认卡，写明预计占用 GPU 多久，你点「开始」才会提交。剪辑成片和查看视频画面需要运行服务的电脑装有 [ffmpeg](https://ffmpeg.org/)（macOS：`brew install ffmpeg`）。
 
 ## 官方模板
 
@@ -196,7 +200,8 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 - 25 official ComfyUI templates as ready-made tools, with per-template model checks, download links and target folders
 - Import any workflow from ComfyUI's **Export (API)**: prompts, image inputs, seed, size and parameters are detected and editable
 - Drag a line out of an image to place the next generation exactly where you want it
-- Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`)
+- Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`). It can take a short drama from a one-line idea to a cut: script and shot list as text notes, character and scene sheets, keyframes, one video per shot (after you approve the GPU time), then an edit (needs ffmpeg)
+- Text notes on the board for scripts, shot lists and comments
 
 ```bash
 git clone <this repository> infinode && cd infinode

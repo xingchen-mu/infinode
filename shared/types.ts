@@ -228,9 +228,12 @@ export interface Settings {
   comfyUrl: string;
 }
 
+/** Text items hold notes such as a script or a shot list. */
+export type ItemKind = MediaKind | 'text';
+
 export interface CanvasItem {
   id: string;
-  kind: MediaKind;
+  kind: ItemKind;
   x: number;
   y: number;
   w: number;
@@ -249,6 +252,8 @@ export interface CanvasItem {
   sourceId?: string;
   error?: string;
   name?: string;
+  /** Text items: the note (light Markdown); `name` is its title. */
+  text?: string;
   createdAt: number;
 }
 
@@ -288,12 +293,16 @@ export type AgentEntry =
       at: number;
     }
   | { kind: 'assistant'; id: string; text: string; error?: string; at: number }
+  /** Something that happened on its own, e.g. a batch of tasks finished and woke the agent. */
+  | { kind: 'event'; id: string; text: string; at: number }
   | {
       kind: 'tool';
       id: string;
       tool: string;
       label: string;
-      status: 'running' | 'done' | 'error';
+      /** `waiting`: held until the user approves it in the panel (`approval`). */
+      status: 'running' | 'done' | 'error' | 'waiting';
+      approval?: { title: string; detail: string };
       /** One line on what the call is doing or did (or its error). */
       summary: string;
       /** Board items it made or looked at. */

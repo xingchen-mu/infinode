@@ -1,5 +1,5 @@
-import { ArrowUp, CircleAlert, CircleCheck, Loader2, Sparkles, Square, SquarePen, X } from 'lucide-react';
-import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef } from 'react';
+import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, Square, SquarePen, X } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { AgentEntry, AgentEventData, AgentStatus } from '../../shared/types';
 import { ensureVisible } from '../lib/actions';
@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { boundsOf, viewportCenter } from '../lib/geometry';
 import { savePending } from '../project';
 import { select, toast, useStore } from '../store';
+import { Markdown } from './Markdown';
 
 const OPEN_KEY = 'infinode:agent';
 
@@ -157,35 +158,6 @@ function Chips({ ids }: { ids: string[] }) {
   );
 }
 
-/** `**bold**` and `code` inside a line. */
-function inline(text: string): ReactNode[] {
-  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, i) =>
-    part.startsWith('**') && part.endsWith('**') && part.length > 4 ? (
-      <b key={i}>{part.slice(2, -2)}</b>
-    ) : part.startsWith('`') && part.endsWith('`') && part.length > 2 ? (
-      <code key={i}>{part.slice(1, -1)}</code>
-    ) : (
-      <Fragment key={i}>{part}</Fragment>
-    ),
-  );
-}
-
-/** The bits of Markdown models use most: headings, lists, bold, code. */
-function Text({ text }: { text: string }) {
-  return (
-    <div className="agent-text">
-      {text.split('\n').map((line, i) => {
-        const heading = /^#{1,6}\s+(.*)$/.exec(line);
-        const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
-        if (heading) return <p key={i} className="h">{inline(heading[1])}</p>;
-        if (bullet) return <p key={i} className="li">• {inline(bullet[1])}</p>;
-        if (/^\s*\d+[.、)]\s+/.test(line)) return <p key={i} className="li">{inline(line.trim())}</p>;
-        return line.trim() ? <p key={i}>{inline(line)}</p> : <p key={i} className="gap" />;
-      })}
-    </div>
-  );
-}
-
 function Entry({ entry }: { entry: AgentEntry }) {
   if (entry.kind === 'user') {
     return (
@@ -198,7 +170,7 @@ function Entry({ entry }: { entry: AgentEntry }) {
   if (entry.kind === 'assistant') {
     return (
       <div className="agent-msg assistant">
-        {entry.text && <Text text={entry.text} />}
+        {entry.text && <Markdown text={entry.text} className="agent-text" />}
         {entry.error && (
           <div className="agent-error">
             <CircleAlert /> {entry.error}
@@ -207,10 +179,25 @@ function Entry({ entry }: { entry: AgentEntry }) {
       </div>
     );
   }
+  if (entry.kind === 'event') {
+    return (
+      <div className="agent-event">
+        <Bell /> <span>{entry.text}</span>
+      </div>
+    );
+  }
   return (
     <div className={`agent-tool ${entry.status}`}>
       <span className="agent-tool-icon">
-        {entry.status === 'running' ? <Loader2 className="spin" /> : entry.status === 'done' ? <CircleCheck /> : <CircleAlert />}
+        {entry.status === 'running' ? (
+          <Loader2 className="spin" />
+        ) : entry.status === 'done' ? (
+          <CircleCheck />
+        ) : entry.status === 'waiting' ? (
+          <Hourglass />
+        ) : (
+          <CircleAlert />
+        )}
       </span>
       <div className="agent-tool-main">
         <div className="agent-tool-line" title={entry.summary}>
@@ -218,6 +205,37 @@ function Entry({ entry }: { entry: AgentEntry }) {
           {entry.summary && <span>{entry.summary}</span>}
         </div>
         {entry.items && <Chips ids={entry.items} />}
+        {entry.status === 'waiting' && entry.approval && <Approval id={entry.id} approval={entry.approval} />}
+      </div>
+    </div>
+  );
+}
+
+/** Work the agent holds until the user agrees, e.g. a batch of long video generations. */
+function Approval({ id, approval }: { id: string; approval: { title: string; detail: string } }) {
+  const [busy, setBusy] = useState(false);
+  const answer = async (ok: boolean) => {
+    const { projectId } = useAgent.getState();
+    if (!projectId) return;
+    setBusy(true);
+    try {
+      await api.approveAgent(projectId, id, ok);
+    } catch (err) {
+      toast((err as Error).message, 'error');
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="agent-approval">
+      <b>{approval.title}</b>
+      <span>{approval.detail}</span>
+      <div className="agent-approval-bar">
+        <button className="btn ghost small" disabled={busy} onClick={() => void answer(false)}>
+          不要
+        </button>
+        <button className="btn primary small" disabled={busy} onClick={() => void answer(true)}>
+          开始
+        </button>
       </div>
     </div>
   );
@@ -252,7 +270,7 @@ export function AgentPanel() {
 
   if (!open) return null;
   const last = entries[entries.length - 1];
-  const thinking = running && (!last || last.kind === 'user' || (last.kind === 'tool' && last.status !== 'running'));
+  const thinking = running && (!last || last.kind === 'user' || last.kind === 'event' || (last.kind === 'tool' && last.status !== 'running'));
   const ready = Boolean(status?.ready);
 
   return (

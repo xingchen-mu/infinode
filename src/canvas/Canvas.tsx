@@ -311,6 +311,10 @@ export function Canvas() {
     const p = toWorld(st.viewport, sx, sy);
     const item = itemAt(st.items, p);
     if (item?.asset) useStore.setState({ lightboxId: item.id });
+    else if (item?.kind === 'text') {
+      select([item.id]);
+      useStore.setState({ noteEditing: item.id });
+    }
   };
 
   const onContextMenu = (e: React.MouseEvent) => {
