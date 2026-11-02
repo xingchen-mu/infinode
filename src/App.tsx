@@ -7,6 +7,7 @@ import { api, subscribeEvents } from './lib/api';
 import { CLIP_MARKER, copySelection, hasInternalClipboard, pasteInternal } from './lib/clipboard';
 import { bootstrap, flushSave, onProjectEvent, refreshProject, setupAutosave, syncTasks } from './project';
 import { applyTask, redo, removeItems, select, setShowLinks, toast, undo, updateItems, useStore, zoomAt } from './store';
+import { AgentPanel, onAgentEvent, refreshAgent } from './ui/AgentPanel';
 import { Composer } from './ui/Composer';
 import { LeftToolbar } from './ui/LeftToolbar';
 import { Lightbox } from './ui/Lightbox';
@@ -148,6 +149,7 @@ export function App() {
     const stopEvents = subscribeEvents({
       onTask: applyTask,
       onProject: onProjectEvent,
+      onAgent: onAgentEvent,
       onComfy: (online) => {
         useStore.setState({ comfyOnline: online });
         if (online) void refreshCaps(true);
@@ -157,6 +159,7 @@ export function App() {
         active.forEach(applyTask);
         void syncTasks();
         refreshProject();
+        void refreshAgent();
       },
       onConnection: (ok) => {
         useStore.setState({ serverOnline: ok });
@@ -197,6 +200,7 @@ export function App() {
       <TopBar />
       <LeftToolbar />
       {editing ? editing.kind === 'outpaint' ? <OutpaintPanel /> : <MaskPanel /> : <Composer />}
+      <AgentPanel />
       <Lightbox />
       <Modals />
       <Toasts />

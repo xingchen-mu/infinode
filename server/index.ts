@@ -4,10 +4,12 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { serve } from '@hono/node-server';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import type { Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
+import type { AgentEventData, Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
+import { AgentHub } from './agent/runtime.ts';
 import { AssetStore, mimeFor, publicAsset } from './assets.ts';
 import { ComfyClient, ComfyError } from './comfy.ts';
 import { config } from './config.ts';
@@ -61,6 +63,19 @@ await Promise.all([assets.init(), projects.init(), workflows.init(), presets.ini
 const comfyStatus = EventTargetLike<boolean>();
 /** Board changes, so open pages can merge edits made elsewhere (another tab, a script, an agent). */
 const projectEvents = EventTargetLike<{ id: string; updatedAt: number; by: string; deleted?: boolean }>();
+const agentEvents = EventTargetLike<AgentEventData>();
+const agent = new AgentHub(
+  {
+    projects,
+    tasks,
+    assets,
+    workflows: () => [...workflows.list(), ...presets.list()],
+    capabilities: () => capabilities(),
+    changed: (p) => projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: 'agent' }),
+  },
+  (e) => agentEvents.emit(e),
+);
+await agent.init();
 comfy.connect(
   (e) => tasks.onComfyEvent(e),
   (online) => {
@@ -366,13 +381,17 @@ app.get('/api/events', (c) =>
     const onTask = (t: Task) => void send('task', t);
     const onComfy = (online: boolean) => void send('comfy', { online });
     const onProject = (e: { id: string; updatedAt: number; by: string }) => void send('project', e);
+    // The agent conversation stays on this machine, like the agent itself.
+    const onAgent = (e: AgentEventData) => void send('agent', e);
     tasks.on('task', onTask);
     comfyStatus.on(onComfy);
     projectEvents.on(onProject);
+    if (isLocal(c)) agentEvents.on(onAgent);
     stream.onAbort(() => {
       tasks.off('task', onTask);
       comfyStatus.off(onComfy);
       projectEvents.off(onProject);
+      agentEvents.off(onAgent);
     });
     await send('hello', { comfyOnline: comfy.online, active: tasks.active() });
     while (!stream.aborted) {
@@ -425,7 +444,35 @@ app.patch('/api/projects/:id/items', async (c) => {
 });
 app.delete('/api/projects/:id', async (c) => {
   await projects.remove(c.req.param('id'));
+  await agent.forget(c.req.param('id'));
   projectEvents.emit({ id: c.req.param('id'), updatedAt: Date.now(), by: writer(c), deleted: true });
+  return c.json({ ok: true });
+});
+
+// ------------------------------------------------------------------ canvas agent
+
+// The agent spends the owner's API credits: only this machine may use it, even with the canvas shared on the LAN.
+app.use('/api/agent/*', async (c, next) => {
+  if (!isLocal(c)) return c.json({ error: '画布助手只能在运行服务的这台电脑上使用' }, 403);
+  await next();
+});
+app.get('/api/agent/status', (c) => c.json(agent.status));
+app.get('/api/agent/:projectId', async (c) => c.json(await agent.view(c.req.param('projectId'))));
+app.post('/api/agent/:projectId', async (c) => {
+  const body = await c.req.json<{ text?: string; selection?: string[]; view?: { x: number; y: number } }>();
+  await agent.send(c.req.param('projectId'), {
+    text: typeof body.text === 'string' ? body.text : '',
+    selection: Array.isArray(body.selection) ? body.selection.filter((id) => typeof id === 'string') : [],
+    view: body.view,
+  });
+  return c.json({ ok: true });
+});
+app.post('/api/agent/:projectId/abort', async (c) => {
+  await agent.abort(c.req.param('projectId'));
+  return c.json({ ok: true });
+});
+app.delete('/api/agent/:projectId', async (c) => {
+  await agent.clear(c.req.param('projectId'));
   return c.json({ ok: true });
 });
 
@@ -442,6 +489,11 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, () => {
     void Promise.allSettled([tasks.flush(), assets.flush()]).then(() => process.exit(0));
   });
+}
+
+/** The request comes from this machine (directly or through the Vite dev proxy). */
+function isLocal(c: Parameters<typeof getConnInfo>[0]) {
+  return /^(127\.|::1$|::ffff:127\.)/.test(getConnInfo(c).remote.address ?? '');
 }
 
 /** Tiny listener set for the ComfyUI online flag. */

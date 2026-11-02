@@ -1,4 +1,7 @@
 import type {
+  AgentEventData,
+  AgentStatus,
+  AgentView,
   AssetInfo,
   Capabilities,
   CustomWorkflow,
@@ -108,6 +111,13 @@ export const api = {
   createWorkflow: (workflow: WorkflowData) => request<CustomWorkflow>('/api/workflows', json('POST', { workflow })),
   updateWorkflow: (id: string, workflow: WorkflowData) => request<CustomWorkflow>(`/api/workflows/${id}`, json('PUT', { workflow })),
   deleteWorkflow: (id: string) => request<{ ok: true }>(`/api/workflows/${id}`, { method: 'DELETE' }),
+
+  agentStatus: () => request<AgentStatus>('/api/agent/status'),
+  agent: (projectId: string) => request<AgentView>(`/api/agent/${projectId}`),
+  sendAgent: (projectId: string, body: { text: string; selection: string[]; view: { x: number; y: number } }) =>
+    request<{ ok: true }>(`/api/agent/${projectId}`, json('POST', body)),
+  abortAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}/abort`, { method: 'POST' }),
+  clearAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}`, { method: 'DELETE' }),
 };
 
 export interface EventHandlers {
@@ -115,6 +125,7 @@ export interface EventHandlers {
   onComfy(online: boolean): void;
   onHello(data: { comfyOnline: boolean; active: Task[] }): void;
   onProject(e: ProjectEvent): void;
+  onAgent(e: AgentEventData): void;
   onConnection(ok: boolean): void;
 }
 
@@ -128,6 +139,7 @@ export function subscribeEvents(h: EventHandlers): () => void {
   es.addEventListener('task', (e) => h.onTask(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('comfy', (e) => h.onComfy(JSON.parse((e as MessageEvent).data).online));
   es.addEventListener('project', (e) => h.onProject(JSON.parse((e as MessageEvent).data)));
+  es.addEventListener('agent', (e) => h.onAgent(JSON.parse((e as MessageEvent).data)));
   es.onerror = () => h.onConnection(false);
   return () => es.close();
 }

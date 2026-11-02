@@ -35,6 +35,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - **导入你自己的工作流**：ComfyUI 里「导出 (API)」得到的 JSON 拖进来，自动识别提示词、图片输入、种子、尺寸和参数，导入后就是画布上的新工具
 - **本地部署**：页面和数据都在你自己的机器上；ComfyUI 可以在本机、局域网或远程服务器（支持自动 SSH 隧道）
 - **实时进度**：排队位置、当前阶段、进度条、已用时间，可随时取消，失败一键重试
+- **画布助手**：右上角「助手」打开对话面板，用一句话让它读画布、看图、出图、出视频、运行你的工作流，结果照样连线；模型可用 DeepSeek 等，也可接任意 OpenAI 兼容接口
 
 <table>
 <tr>
@@ -59,7 +60,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 
 需要：
 
-- [Node.js](https://nodejs.org/) 22 或更高
+- [Node.js](https://nodejs.org/) 22.19 或更高
 - 一个可以访问的 [ComfyUI](https://github.com/comfyanonymous/ComfyUI)（建议较新的版本，官方模板依赖新版自带的节点）
 - 桌面浏览器（Chrome / Edge / Safari）
 
@@ -94,6 +95,22 @@ Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的�
 | 预览 | 双击图片或视频（视频带声音） |
 | 连线 | 悬停或选中图片高亮它的连线；`L` 显示 / 隐藏全部连线 |
 | 其他 | `⌘Z` 撤销、`⌘D` 复制一份、`Delete` 删除、`⇧1` 显示全部、`/` 聚焦输入框 |
+| 画布助手 | 右上角「助手」，用一句话说要做什么；发送时会带上画布上选中的节点 |
+
+### 画布助手
+
+助手用的是你自己的大模型 API key，在项目根目录的 `.env` 里配置，然后重启 `npm run dev`：
+
+```bash
+DEEPSEEK_API_KEY=sk-...                 # 默认模型 deepseek/deepseek-flash（能看图）
+# AGENT_MODEL=anthropic/claude-sonnet-5-5 # 也可以换成 pi-ai 支持的其它模型，配上对应的 key
+# 或者任意 OpenAI 兼容接口（豆包、百炼、Ollama、vLLM…）：
+# AGENT_BASE_URL=http://127.0.0.1:11434/v1
+# AGENT_MODEL=qwen3:32b
+# AGENT_API_KEY=...
+```
+
+助手会把画布概况（节点名称、提示词）和它查看的图片发给你配置的模型服务。key 只保存在你的机器上；把画布共享到局域网时，助手也只能在运行服务的那台电脑上使用。
 
 ## 官方模板
 
@@ -179,6 +196,7 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 - 25 official ComfyUI templates as ready-made tools, with per-template model checks, download links and target folders
 - Import any workflow from ComfyUI's **Export (API)**: prompts, image inputs, seed, size and parameters are detected and editable
 - Drag a line out of an image to place the next generation exactly where you want it
+- Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`)
 
 ```bash
 git clone <this repository> infinode && cd infinode

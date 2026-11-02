@@ -15,7 +15,7 @@
   ],
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.19"
   },
   "scripts": {
     "dev": "concurrently -k -n tunnel,server,web -c gray,cyan,magenta \"node scripts/tunnel.mjs\" \"tsx watch --clear-screen=false server/index.ts\" \"vite\"",
@@ -29,6 +29,8 @@
     "build:presets": "tsx scripts/build-presets.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
     "@hono/node-server": "^2.1.5",
     "hono": "^4.13.14",
     "image-size": "^2.0.4",

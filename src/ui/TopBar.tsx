@@ -5,6 +5,7 @@ import { fitAll } from '../lib/actions';
 import { api } from '../lib/api';
 import { applyTask, toast, useStore, zoomAt } from '../store';
 import { createProject, openProject } from '../project';
+import { AgentButton } from './AgentPanel';
 
 function useOutsideClose(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -216,6 +217,7 @@ export function TopBar() {
         <span className={`save-state ${saveState}`}>{saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : '已保存'}</span>
       </div>
       <div className="topbar right" data-ui>
+        <AgentButton />
         <TaskMenu />
         <button className="pill" onClick={() => useStore.setState({ modal: { type: 'workflows' } })} title="导入和管理自己的 ComfyUI 工作流">
           <Puzzle /> 我的工作流

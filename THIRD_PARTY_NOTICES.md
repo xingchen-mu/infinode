@@ -34,7 +34,9 @@ Template thumbnails are not included; the app loads them from your own ComfyUI.
 ## npm dependencies
 
 Installed by `npm install`, not included in this repository, each under its own license:
-React, React DOM, Zustand, Hono, @hono/node-server, nanoid, image-size (MIT); lucide-react (ISC).
+React, React DOM, Zustand, Hono, @hono/node-server, nanoid, image-size, @earendil-works/pi-ai and
+@earendil-works/pi-agent-core ([pi](https://github.com/earendil-works/pi), used for the canvas assistant) (MIT);
+lucide-react (ISC).
 
 ## Not included
 

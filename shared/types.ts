@@ -274,3 +274,54 @@ export interface ProjectSummary {
   itemCount: number;
   cover?: string;
 }
+
+// ------------------------------------------------------------------ canvas agent
+
+/** One row of the agent panel's conversation. */
+export type AgentEntry =
+  | {
+      kind: 'user';
+      id: string;
+      text: string;
+      /** Board items selected when the message was sent. */
+      selection?: string[];
+      at: number;
+    }
+  | { kind: 'assistant'; id: string; text: string; error?: string; at: number }
+  | {
+      kind: 'tool';
+      id: string;
+      tool: string;
+      label: string;
+      status: 'running' | 'done' | 'error';
+      /** One line on what the call is doing or did (or its error). */
+      summary: string;
+      /** Board items it made or looked at. */
+      items?: string[];
+      at: number;
+    };
+
+export interface AgentStatus {
+  /** False until a model is usable (e.g. its API key is missing); `reason` says what to do. */
+  ready: boolean;
+  /** "provider/model", e.g. "deepseek/deepseek-flash". */
+  model: string;
+  /** The model can look at images. */
+  vision: boolean;
+  reason?: string;
+}
+
+export interface AgentView {
+  entries: AgentEntry[];
+  running: boolean;
+}
+
+/** Sent over /api/events as `agent`. */
+export interface AgentEventData {
+  projectId: string;
+  /** Added or changed (matched by id). */
+  entry?: AgentEntry;
+  running?: boolean;
+  /** The conversation was cleared. */
+  reset?: boolean;
+}

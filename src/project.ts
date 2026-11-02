@@ -126,6 +126,11 @@ export function flushSave() {
   if (saveTimer) void save(true);
 }
 
+/** Resolves once pending edits are on the server, e.g. before something there reads the board. */
+export function savePending(): Promise<void> {
+  return saveTimer ? save() : serial(async () => {});
+}
+
 export function setupAutosave() {
   return useStore.subscribe((s, prev) => {
     if (loading || applyingRemote || !s.projectId || s.projectId !== prev.projectId) return;
