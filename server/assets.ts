@@ -4,6 +4,7 @@ import { imageSize } from 'image-size';
 import { nanoid } from 'nanoid';
 import type { AssetInfo, MediaKind } from '../shared/types.ts';
 import { config } from './config.ts';
+import { t } from './i18n.ts';
 
 export interface StoredAsset extends AssetInfo {
   file: string;
@@ -77,7 +78,7 @@ export class AssetStore {
     opts: { filename?: string; mime?: string; size?: { width: number; height: number }; name?: string; comfyName?: string },
   ): Promise<StoredAsset> {
     const mime = opts.mime || (opts.filename ? mimeFor(opts.filename) : undefined);
-    if (!mime || !EXT_BY_MIME[mime]) throw new Error(`不支持的文件类型: ${opts.filename ?? mime ?? 'unknown'}`);
+    if (!mime || !EXT_BY_MIME[mime]) throw new Error(t('不支持的文件类型: {name}', { name: opts.filename ?? mime ?? 'unknown' }));
     const kind: MediaKind = mime.startsWith('video/') ? 'video' : 'image';
     let width = opts.size?.width ?? 0;
     let height = opts.size?.height ?? 0;

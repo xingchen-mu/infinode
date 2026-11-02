@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Capabilities, CanvasItem, CustomWorkflow, ImageQuality, PresetInfo, Task, VideoQuality, Viewport, WorkflowDraft } from '../shared/types';
+import { msg } from '../shared/i18n';
 
 export type Tool = 'select' | 'hand';
 export interface EditMode {
@@ -148,14 +149,14 @@ export function resolveItems(items: CanvasItem[], tasks: Record<string, Task>): 
     if (task.status === 'done') {
       const asset = task.results[it.resultIndex ?? 0] ?? task.results[0];
       changed = true;
-      if (!asset) return { ...it, taskId: undefined, error: '没有返回结果' };
+      if (!asset) return { ...it, taskId: undefined, error: msg('没有返回结果') };
       const aspect = asset.width / asset.height;
       const h = Math.abs(it.w / it.h - aspect) > 0.01 ? Math.round(it.w / aspect) : it.h;
       return { ...it, kind: asset.kind, taskId: undefined, error: undefined, asset, h, y: it.y + (it.h - h) / 2 };
     }
     if ((task.status === 'error' || task.status === 'cancelled') && !it.error) {
       changed = true;
-      return { ...it, error: task.status === 'cancelled' ? '已取消' : (task.error ?? '生成失败') };
+      return { ...it, error: task.status === 'cancelled' ? msg('已取消') : (task.error ?? msg('生成失败')) };
     }
     return it;
   });

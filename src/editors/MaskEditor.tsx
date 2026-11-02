@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { maskedEdit, runWorkflow } from '../lib/actions';
 import { api } from '../lib/api';
 import { toast, useStore } from '../store';
+import { t } from '../i18n';
 
 interface MaskState {
   size: number;
@@ -64,7 +65,7 @@ function exportMask(canvas: HTMLCanvasElement, width: number, height: number): P
   ctx.globalCompositeOperation = 'destination-over';
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, width, height);
-  return new Promise((resolve, reject) => out.toBlob((b) => (b ? resolve(b) : reject(new Error('导出蒙版失败'))), 'image/png'));
+  return new Promise((resolve, reject) => out.toBlob((b) => (b ? resolve(b) : reject(new Error(t('导出蒙版失败')))), 'image/png'));
 }
 
 /** Paint layer over the edited item, in board space. */
@@ -181,14 +182,14 @@ export function MaskPanel() {
   const submit = async () => {
     const { canvas } = useMask.getState();
     if (!canvas || !item?.asset || busy) return;
-    if (!hasStrokes) return toast('先在图片上涂抹要修改的区域', 'info');
-    if (editing.kind === 'inpaint' && !prompt.trim()) return toast('描述一下涂抹区域要画什么', 'info');
+    if (!hasStrokes) return toast(t('先在图片上涂抹要修改的区域'), 'info');
+    if (editing.kind === 'inpaint' && !prompt.trim()) return toast(t('描述一下涂抹区域要画什么'), 'info');
     setBusy(true);
     try {
       const blob = await exportMask(canvas, item.asset.width, item.asset.height);
       close();
       if (custom) {
-        if (!workflow) throw new Error('这个工作流已被删除');
+        if (!workflow) throw new Error(t('这个工作流已被删除'));
         const mask = await api.uploadAsset(blob, 'mask.png');
         await runWorkflow(workflow, { prompt: prompt.trim(), images: [item], mask });
         return;
@@ -204,29 +205,29 @@ export function MaskPanel() {
   return (
     <div className="panel edit-panel" data-ui>
       <div className="edit-head">
-        <div className="edit-title">{custom ? (workflow?.name ?? '工作流') : editing.kind === 'inpaint' ? '局部重绘' : '消除'}</div>
+        <div className="edit-title">{custom ? t(workflow?.name ?? '工作流') : editing.kind === 'inpaint' ? t('局部重绘') : t('消除')}</div>
         <div className="edit-hint">
-          {custom ? '涂抹要处理的区域' : editing.kind === 'inpaint' ? '涂抹要重画的区域，再描述想画的内容' : '涂抹想去掉的物体，会用周围背景自然补全'}
+          {custom ? t('涂抹要处理的区域') : editing.kind === 'inpaint' ? t('涂抹要重画的区域，再描述想画的内容') : t('涂抹想去掉的物体，会用周围背景自然补全')}
         </div>
       </div>
       <div className="edit-tools">
         <div className="seg">
-          <button className={!erasing ? 'on' : ''} onClick={() => useMask.setState({ erasing: false })} title="画笔 (B)">
-            <Brush /> 画笔
+          <button className={!erasing ? 'on' : ''} onClick={() => useMask.setState({ erasing: false })} title={t('画笔 (B)')}>
+            <Brush /> {t('画笔')}
           </button>
-          <button className={erasing ? 'on' : ''} onClick={() => useMask.setState({ erasing: true })} title="橡皮 (E)">
-            <Eraser /> 橡皮
+          <button className={erasing ? 'on' : ''} onClick={() => useMask.setState({ erasing: true })} title={t('橡皮 (E)')}>
+            <Eraser /> {t('橡皮')}
           </button>
         </div>
-        <label className="slider" title="笔刷大小 ( [ / ] )">
-          <span>大小</span>
+        <label className="slider" title={t('笔刷大小 ( [ / ] )')}>
+          <span>{t('大小')}</span>
           <input type="range" min={6} max={200} value={size} onChange={(e) => useMask.setState({ size: Number(e.target.value) })} />
           <span className="slider-val">{size}</span>
         </label>
-        <button className="icon-btn" onClick={undoStroke} disabled={!history.length} title="撤销一笔 (⌘Z)">
+        <button className="icon-btn" onClick={undoStroke} disabled={!history.length} title={t('撤销一笔 (⌘Z)')}>
           <Undo2 />
         </button>
-        <button className="icon-btn" onClick={clearMask} disabled={!hasStrokes} title="清空">
+        <button className="icon-btn" onClick={clearMask} disabled={!hasStrokes} title={t('清空')}>
           <Trash2 />
         </button>
       </div>
@@ -235,7 +236,7 @@ export function MaskPanel() {
           className="edit-prompt"
           rows={2}
           autoFocus
-          placeholder="例如：一只戴墨镜的柯基"
+          placeholder={t('例如：一只戴墨镜的柯基')}
           value={prompt}
           onChange={(e) => useMask.setState({ prompt: e.target.value })}
           onKeyDown={(e) => {
@@ -248,11 +249,11 @@ export function MaskPanel() {
       )}
       <div className="edit-actions">
         <button className="btn ghost" onClick={close}>
-          取消
+          {t('取消')}
         </button>
         <button className="btn primary" onClick={() => void submit()} disabled={busy || !hasStrokes || (editing.kind === 'inpaint' && !prompt.trim())}>
           {busy ? <Loader2 className="spin" /> : null}
-          {custom ? '生成' : editing.kind === 'inpaint' ? '重绘' : '消除'}
+          {custom ? t('生成') : editing.kind === 'inpaint' ? t('重绘') : t('消除')}
         </button>
       </div>
     </div>

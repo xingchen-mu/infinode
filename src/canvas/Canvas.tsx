@@ -11,6 +11,7 @@ import { OutpaintFrame } from '../editors/OutpaintEditor';
 import { ItemToolbar } from './ItemToolbar';
 import { ItemView } from './ItemView';
 import { Links, slotRect } from './Links';
+import { t } from '../i18n';
 
 type Handle = 'nw' | 'ne' | 'sw' | 'se';
 
@@ -71,7 +72,7 @@ function SelectionLayer({ marquee, showHandles }: { marquee: Rect | null; showHa
             </div>
           )}
           {single?.asset && single.kind === 'image' && showHandles && (
-            <div className="port" data-port={single.id} title="拖出一条线，在线的另一端生成新内容">
+            <div className="port" data-port={single.id} title={t('拖出一条线，在线的另一端生成新内容')}>
               <Plus />
             </div>
           )}
@@ -387,8 +388,8 @@ export function Canvas() {
       {menu && <ContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {items.length === 0 && !editing && (
         <div className="empty-hint">
-          <div className="empty-title">从一句话开始创作</div>
-          <div className="empty-sub">在下方输入提示词生成图片或视频，或把图片拖进画布</div>
+          <div className="empty-title">{t('从一句话开始创作')}</div>
+          <div className="empty-sub">{t('在下方输入提示词生成图片或视频，或把图片拖进画布')}</div>
         </div>
       )}
     </div>

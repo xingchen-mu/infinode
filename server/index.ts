@@ -10,7 +10,8 @@ import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { AgentEventData, Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
 import { AgentHub } from './agent/runtime.ts';
-import { COMMERCIAL_BLOCK, LICENSES, commercialBlock } from '../shared/licenses.ts';
+import { isLang, msg } from '../shared/i18n.ts';
+import { LICENSES, blockReason, commercialBlock, isBlock } from '../shared/licenses.ts';
 import { allowedHost, hostName } from './hosts.ts';
 import { CanvasMcp, type Presence } from './mcp.ts';
 import { AssetStore, mimeFor, publicAsset } from './assets.ts';
@@ -35,6 +36,7 @@ import {
 } from './workflows/custom.ts';
 import { REQUIREMENTS, RequestError, featureKey } from './workflows/index.ts';
 import { missingFor, resolveModels } from './workflows/models.ts';
+import { t } from './i18n.ts';
 
 async function stableClientId() {
   const file = join(config.dataDir, 'comfy-client-id');
@@ -102,6 +104,9 @@ type ObjectInfo = Awaited<ReturnType<ComfyClient['objectInfo']>>;
 let capsCache: { at: number; value: Capabilities; info: ObjectInfo } | undefined;
 
 /** What the connected ComfyUI can run; also picks model files for the built-in tools. */
+/** Listed with a template's missing parts when the GPU cannot run its fp8 models. */
+const FP8_NOTE = msg('fp8 模型（当前 GPU 在 --enable-triton-backend 下不支持 fp8，去掉该启动参数或换 bf16/int8 模型）');
+
 async function capabilities(force = false): Promise<Capabilities> {
   if (!force && capsCache && Date.now() - capsCache.at < 60_000 && capsCache.value.comfyUrl === comfy.baseUrl) return capsCache.value;
   try {
@@ -118,7 +123,7 @@ async function capabilities(force = false): Promise<Capabilities> {
       const fixed = structuredClone(graph);
       fixModelPaths(fixed, info);
       const fp8 = Object.values(fixed).some((n) => Object.values(n.inputs).some((v) => typeof v === 'string' && /fp8/i.test(v) && /\.(safetensors|gguf)$/.test(v)));
-      return fp8 ? ['fp8 模型（当前 GPU 在 --enable-triton-backend 下不支持 fp8，去掉该启动参数或换 bf16/int8 模型）'] : [];
+      return fp8 ? [t(FP8_NOTE)] : [];
     };
     const features: Capabilities['features'] = {};
     for (const key of Object.keys(REQUIREMENTS)) features[key] = missingFor(key, info);
@@ -168,7 +173,7 @@ const app = new Hono();
 app.use('*', async (c, next) => {
   const host = c.req.header('host');
   if (allowedHost(host, config.allowedHosts, !/^(127\.|::1$|localhost$)/.test(config.host))) return next();
-  return c.json({ error: `不接受来自 ${hostName(host) || '未知地址'} 的访问：请用 localhost 或 IP 地址打开，或把这个域名加进 .env 的 ALLOWED_HOSTS` }, 403);
+  return c.json({ error: t('不接受来自 {host} 的访问：请用 localhost 或 IP 地址打开，或把这个域名加进 .env 的 ALLOWED_HOSTS', { host: hostName(host) || t('未知地址') }) }, 403);
 });
 
 app.onError((err, c) => {
@@ -190,7 +195,7 @@ app.post('/api/settings/test', async (c) => {
   try {
     url = normalizeComfyUrl(comfyUrl);
   } catch (err) {
-    return c.json({ ok: false, error: `地址格式不对：${(err as Error).message}` });
+    return c.json({ ok: false, error: t('地址格式不对：{message}', { message: (err as Error).message }) });
   }
   try {
     const probe = new ComfyClient(url, 'probe');
@@ -202,7 +207,11 @@ app.post('/api/settings/test', async (c) => {
 });
 
 app.put('/api/settings', async (c) => {
-  const body = await c.req.json<{ comfyUrl?: string; commercialOnly?: boolean }>();
+  const body = await c.req.json<{ comfyUrl?: string; commercialOnly?: boolean; language?: unknown }>();
+  if (isLang(body.language) && body.language !== settings.value.language) {
+    await settings.save({ language: body.language });
+    capsCache = undefined; // its notes are in the old language
+  }
   if (typeof body.commercialOnly === 'boolean' && body.commercialOnly !== Boolean(settings.value.commercialOnly)) {
     await settings.save({ commercialOnly: body.commercialOnly });
     capsCache = undefined;
@@ -212,7 +221,7 @@ app.put('/api/settings', async (c) => {
     try {
       url = normalizeComfyUrl(body.comfyUrl);
     } catch (err) {
-      throw new RequestError(`地址格式不对：${(err as Error).message}`);
+      throw new RequestError(t('地址格式不对：{message}', { message: (err as Error).message }));
     }
     if (url !== comfy.baseUrl) {
       await settings.save({ comfyUrl: url });
@@ -231,7 +240,7 @@ app.get('/api/presets', async (c) => {
   const list: PresetInfo[] = presets.list().map(({ graph, ...p }) => {
     const issues = info ? graphIssues(graph, info) : [];
     const missingFiles = [...new Set(issues.filter((i) => i.type === 'file').map((i) => i.value!))];
-    const blocked = capsCache?.value.features[`custom:${p.id}`]?.filter((m) => m.startsWith('fp8') || m.startsWith(COMMERCIAL_BLOCK)) ?? [];
+    const blocked = capsCache?.value.features[`custom:${p.id}`]?.filter((m) => m === t(FP8_NOTE) || isBlock(m)) ?? [];
     return {
       ...p,
       missing: {
@@ -248,7 +257,7 @@ app.get('/api/presets', async (c) => {
 /** Full preset (graph included), e.g. to copy it into "my workflows". */
 app.get('/api/presets/:id', (c) => {
   const p = presets.get(c.req.param('id'));
-  return p ? c.json(p) : c.json({ error: '模板不存在' }, 404);
+  return p ? c.json(p) : c.json({ error: t('模板不存在') }, 404);
 });
 
 /** Thumbnail from ComfyUI's bundled template package. */
@@ -275,7 +284,7 @@ app.get('/api/presets/:id/thumb', async (c) => {
 
 app.get('/api/workflows', (c) => c.json(workflows.list()));
 
-const OFFLINE_ISSUE: WorkflowIssue = { type: 'offline', message: 'ComfyUI 未连接，暂时无法检查节点和模型' };
+const offlineIssue = (): WorkflowIssue => ({ type: 'offline', message: t('ComfyUI 未连接，暂时无法检查节点和模型') });
 
 /** Reads an uploaded JSON and proposes a mapping for the editor (nothing is saved). */
 app.post('/api/workflows/draft', async (c) => {
@@ -288,7 +297,7 @@ app.post('/api/workflows/draft', async (c) => {
     workflow: saved?.inputs && saved.outputs
       ? { name: saved.name ?? '', description: saved.description, kind: saved.kind === 'video' ? 'video' : 'image', graph, inputs: saved.inputs, outputs: saved.outputs }
       : { ...draft.workflow, name: (body.name ?? '').replace(/\.json$/i, '').trim() },
-    issues: info ? graphIssues(graph, info) : [OFFLINE_ISSUE],
+    issues: info ? graphIssues(graph, info) : [offlineIssue()],
   };
   return c.json(result);
 });
@@ -296,21 +305,21 @@ app.post('/api/workflows/draft', async (c) => {
 /** Mapping editor data for a saved workflow. */
 app.get('/api/workflows/:id/draft', async (c) => {
   const wf = workflows.get(c.req.param('id'));
-  if (!wf) return c.json({ error: '工作流不存在' }, 404);
+  if (!wf) return c.json({ error: t('工作流不存在') }, 404);
   const info = await objectInfo();
   const { outputCandidates } = detectWorkflow(wf.graph, info);
   const result: WorkflowDraft = {
     workflow: wf,
     fields: listFields(wf.graph, info),
     outputCandidates,
-    issues: info ? graphIssues(wf.graph, info) : [OFFLINE_ISSUE],
+    issues: info ? graphIssues(wf.graph, info) : [offlineIssue()],
   };
   return c.json(result);
 });
 
 async function saveWorkflow(data: Omit<CustomWorkflow, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }) {
   if (!data || typeof data.graph !== 'object' || !Array.isArray(data.inputs) || !Array.isArray(data.outputs)) {
-    throw new RequestError('工作流数据不完整');
+    throw new RequestError(t('工作流数据不完整'));
   }
   const problem = checkWorkflow(data);
   if (problem) throw new RequestError(problem);
@@ -325,7 +334,7 @@ app.post('/api/workflows', async (c) => {
 });
 
 app.put('/api/workflows/:id', async (c) => {
-  if (!workflows.get(c.req.param('id'))) return c.json({ error: '工作流不存在' }, 404);
+  if (!workflows.get(c.req.param('id'))) return c.json({ error: t('工作流不存在') }, 404);
   const { workflow } = await c.req.json<{ workflow: Omit<CustomWorkflow, 'id' | 'createdAt' | 'updatedAt'> }>();
   return c.json(await saveWorkflow({ ...workflow, id: c.req.param('id') }));
 });
@@ -339,8 +348,8 @@ app.delete('/api/workflows/:id', async (c) => {
 app.post('/api/assets', async (c) => {
   const body = await c.req.parseBody();
   const file = body.file;
-  if (!(file instanceof File)) return c.json({ error: '缺少文件' }, 400);
-  if (file.size > 200 * 1024 * 1024) return c.json({ error: '文件过大（上限 200MB）' }, 400);
+  if (!(file instanceof File)) return c.json({ error: t('缺少文件') }, 400);
+  if (file.size > 200 * 1024 * 1024) return c.json({ error: t('文件过大（上限 200MB）') }, 400);
   const width = Number(body.width) || undefined;
   const height = Number(body.height) || undefined;
   const asset = await assets.save(new Uint8Array(await file.arrayBuffer()), {
@@ -412,16 +421,16 @@ app.get('/api/tasks', (c) => {
 app.post('/api/tasks', async (c) => {
   const body = await c.req.json<{ request: TaskRequest; id?: string }>();
   const req = body?.request;
-  if (!req || typeof req.op !== 'string') throw new RequestError('请求格式错误');
+  if (!req || typeof req.op !== 'string') throw new RequestError(t('请求格式错误'));
   const block = settings.value.commercialOnly ? commercialBlock(featureKey(req)) : undefined;
-  if (block) throw new RequestError(`已开启「只用可商用的模型」：${block.slice(COMMERCIAL_BLOCK.length)}`);
+  if (block) throw new RequestError(t('已开启「只用可商用的模型」：{reason}', { reason: blockReason(block, t) }));
   await capabilities(); // keeps the built-in tools' model picks current
   return c.json(await tasks.create(req, body.id));
 });
 
 app.post('/api/tasks/:id/cancel', async (c) => {
   const task = await tasks.cancel(c.req.param('id'));
-  return task ? c.json(task) : c.json({ error: '任务不存在' }, 404);
+  return task ? c.json(task) : c.json({ error: t('任务不存在') }, 404);
 });
 
 app.get('/api/events', (c) =>
@@ -460,7 +469,7 @@ app.post('/api/projects', async (c) => {
 });
 app.get('/api/projects/:id', async (c) => {
   const p = await projects.get(c.req.param('id'));
-  return p ? c.json(p) : c.json({ error: '画布不存在' }, 404);
+  return p ? c.json(p) : c.json({ error: t('画布不存在') }, 404);
 });
 /** Who made a change: the page's per-tab id, or "external" for scripts and agents. */
 const writer = (c: { req: { header(name: string): string | undefined } }) => (c.req.header('x-infinode-client') ?? 'external').slice(0, 64);
@@ -471,12 +480,12 @@ app.put('/api/projects/:id', async (c) => {
   // code (or any blind writer) would wipe changes made since. Scripts use PATCH …/items instead.
   if (typeof baseUpdatedAt !== 'number') {
     const current = await projects.get(c.req.param('id'));
-    if (!current) return c.json({ error: '画布不存在' }, 404);
-    return c.json({ error: '页面版本过旧，请刷新页面', project: current }, 409);
+    if (!current) return c.json({ error: t('画布不存在') }, 404);
+    return c.json({ error: t('页面版本过旧，请刷新页面'), project: current }, 409);
   }
   try {
     const p = await projects.save(c.req.param('id'), patch, baseUpdatedAt);
-    if (!p) return c.json({ error: '画布不存在' }, 404);
+    if (!p) return c.json({ error: t('画布不存在') }, 404);
     projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: writer(c) });
     return c.json({ updatedAt: p.updatedAt });
   } catch (err) {
@@ -487,10 +496,10 @@ app.put('/api/projects/:id', async (c) => {
 // Scripts and agents: add / replace / remove items without overwriting what the page is doing.
 app.patch('/api/projects/:id/items', async (c) => {
   const body = await c.req.json<ItemsPatch>();
-  if (!Array.isArray(body.upsert ?? []) || !Array.isArray(body.remove ?? [])) throw new RequestError('请求格式错误');
-  if ((body.upsert ?? []).some((i) => !i || typeof i.id !== 'string')) throw new RequestError('每个节点都需要 id');
+  if (!Array.isArray(body.upsert ?? []) || !Array.isArray(body.remove ?? [])) throw new RequestError(t('请求格式错误'));
+  if ((body.upsert ?? []).some((i) => !i || typeof i.id !== 'string')) throw new RequestError(t('每个节点都需要 id'));
   const p = await projects.patchItems(c.req.param('id'), body);
-  if (!p) return c.json({ error: '画布不存在' }, 404);
+  if (!p) return c.json({ error: t('画布不存在') }, 404);
   projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: writer(c) });
   return c.json({ updatedAt: p.updatedAt, itemCount: p.items.length });
 });
@@ -505,7 +514,7 @@ app.delete('/api/projects/:id', async (c) => {
 
 // The agent spends the owner's API credits: only this machine may use it, even with the canvas shared on the LAN.
 app.use('/api/agent/*', async (c, next) => {
-  if (!isLocal(c)) return c.json({ error: '画布助手只能在运行服务的这台电脑上使用' }, 403);
+  if (!isLocal(c)) return c.json({ error: t('画布助手只能在运行服务的这台电脑上使用') }, 403);
   await next();
 });
 app.get('/api/agent/status', (c) => c.json(agent.status));
@@ -525,7 +534,7 @@ app.post('/api/agent/:projectId/abort', async (c) => {
 });
 app.post('/api/agent/:projectId/approve', async (c) => {
   const body = await c.req.json<{ id?: unknown; ok?: unknown }>();
-  if (typeof body.id !== 'string') throw new RequestError('请求格式错误');
+  if (typeof body.id !== 'string') throw new RequestError(t('请求格式错误'));
   await agent.approve(c.req.param('projectId'), body.id, body.ok === true);
   return c.json({ ok: true });
 });
@@ -540,7 +549,7 @@ app.delete('/api/agent/:projectId', async (c) => {
 app.put('/api/presence', async (c) => {
   if (!isLocal(c)) return c.json({ ok: true });
   const body = await c.req.json<{ projectId?: unknown; selection?: unknown; view?: { x?: unknown; y?: unknown } }>();
-  if (typeof body.projectId !== 'string') throw new RequestError('请求格式错误');
+  if (typeof body.projectId !== 'string') throw new RequestError(t('请求格式错误'));
   const view = body.view && Number.isFinite(body.view.x) && Number.isFinite(body.view.y) ? { x: Number(body.view.x), y: Number(body.view.y) } : undefined;
   const selection = Array.isArray(body.selection) ? body.selection.filter((id): id is string => typeof id === 'string').slice(0, 200) : [];
   presence = { projectId: body.projectId, selection, view, at: Date.now() };
@@ -548,7 +557,7 @@ app.put('/api/presence', async (c) => {
 });
 // Same rule as the assistant: it can spend GPU time, so only this machine.
 app.all('/mcp', async (c) => {
-  if (!isLocal(c)) return c.json({ error: '只接受本机的 MCP 连接' }, 403);
+  if (!isLocal(c)) return c.json({ error: t('只接受本机的 MCP 连接') }, 403);
   return mcp.handle(c.req.raw);
 });
 

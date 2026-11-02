@@ -1,5 +1,6 @@
 import { Graph, type BuiltWorkflow, type Handle, type InputFile, capPixels, snap } from './graph.ts';
 import { model as modelFile } from './models.ts';
+import { t } from '../i18n.ts';
 
 const PREFIX = 'infinode/';
 
@@ -24,7 +25,7 @@ export function zimageGenerate(p: { prompt: string; width: number; height: numbe
     graph: g.nodes,
     outputNodes: [save.id],
     expected: { kind: 'image', width: p.width, height: p.height },
-    stages: [{ node: ks.id, label: '生成中', weight: 1 }],
+    stages: [{ node: ks.id, label: t('生成中'), weight: 1 }],
   };
 }
 
@@ -112,7 +113,7 @@ export function qwenGenerate(p: {
     graph: g.nodes,
     outputNodes: [save.id],
     expected: { kind: 'image', ...expected },
-    stages: [{ node: ks.id, label: '生成中', weight: 1 }],
+    stages: [{ node: ks.id, label: t('生成中'), weight: 1 }],
   };
 }
 
@@ -186,7 +187,7 @@ function qwenMaskedEdit(
     graph: g.nodes,
     outputNodes: [save.id],
     expected: { kind: 'image', width: p.image.width, height: p.image.height },
-    stages: [{ node: ks.id, label: '重绘中', weight: 1 }],
+    stages: [{ node: ks.id, label: t('重绘中'), weight: 1 }],
   };
 }
 
@@ -284,7 +285,7 @@ export function qwenOutpaint(p: {
     graph: g.nodes,
     outputNodes: [save.id],
     expected: { kind: 'image', width, height },
-    stages: [{ node: ks.id, label: '扩图中', weight: 1 }],
+    stages: [{ node: ks.id, label: t('扩图中'), weight: 1 }],
   };
 }
 
@@ -321,6 +322,6 @@ export function seedvr2Upscale(p: { image: InputFile & { hasAlpha?: boolean }; s
     graph: g.nodes,
     outputNodes: [save.id],
     expected: { kind: 'image', width: outW, height: outH },
-    stages: [{ node: up.id, label: '超清中', weight: 1 }],
+    stages: [{ node: up.id, label: t('超清中'), weight: 1 }],
   };
 }

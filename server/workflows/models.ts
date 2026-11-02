@@ -1,3 +1,4 @@
+import { t } from '../i18n.ts';
 // Model files for the built-in tools. Each slot lists the usual file names (first match wins)
 // plus a pattern, so different quantizations (int8 / bf16 / fp8) and subfolders are found.
 
@@ -133,10 +134,10 @@ export const REQUIREMENTS: Record<string, Requirement> = {
 export function missingFor(key: string, info: ObjectInfo): string[] {
   const req = REQUIREMENTS[key];
   if (!req) return [];
-  const missing = req.nodes.filter((n) => !info[n]).map((n) => `节点 ${n}`);
+  const missing = req.nodes.filter((n) => !info[n]).map((n) => t('节点 {name}', { name: n }));
   for (const slot of req.slots) {
     const s: ModelSlot = SLOTS[slot];
-    if (!s.optional && !resolved[slot]) missing.push(`模型 ${s.candidates[0]}`);
+    if (!s.optional && !resolved[slot]) missing.push(t('模型 {name}', { name: s.candidates[0] }));
   }
   return missing;
 }

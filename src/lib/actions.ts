@@ -4,6 +4,7 @@ import { applyTask, commit, removeItems, select, setViewport, setWorkflows, toas
 import { api } from './api';
 import { GAP, type Rect, boundsOf, displaySize, fitViewport, placeRow, toScreen, viewportCenter } from './geometry';
 import { VIDEO_DURATIONS, aspectValue } from './models';
+import { list, t } from '../i18n';
 
 const get = useStore.getState;
 
@@ -80,7 +81,7 @@ function sizeFor(asset: AssetInfo) {
 export async function addFiles(files: File[], at?: { x: number; y: number }) {
   const media = files.filter((f) => /^(image|video)\//.test(f.type));
   if (!media.length) {
-    if (files.length) toast('只支持图片和视频文件', 'error');
+    if (files.length) toast(t('只支持图片和视频文件'), 'error');
     return;
   }
   const assets: AssetInfo[] = [];
@@ -89,7 +90,7 @@ export async function addFiles(files: File[], at?: { x: number; y: number }) {
       const size = f.type.startsWith('video/') ? await videoSize(f) : undefined;
       assets.push(await api.uploadAsset(f, f.name || 'pasted.png', size));
     } catch (err) {
-      toast(`${f.name} 上传失败：${(err as Error).message}`, 'error');
+      toast(t('{name} 上传失败：{message}', { name: f.name, message: (err as Error).message }), 'error');
     }
   }
   if (assets.length) addAssets(assets, at);
@@ -368,21 +369,21 @@ export async function generateFromComposer() {
   const { refs, videos } = composerReferences();
   if (wf) {
     if (wf.inputs.some((i) => i.type === 'mask')) {
-      toast('这个工作流需要蒙版：选中图片后，在图片上方的「我的工具」里使用', 'info');
+      toast(t('这个工作流需要蒙版：选中图片后，在图片上方的「我的工具」里使用'), 'info');
       return;
     }
     if (!text && !promptOptional(wf)) {
-      toast('先写一句提示词吧', 'info');
+      toast(t('先写一句提示词吧'), 'info');
       return;
     }
     const needImages = wf.inputs.filter((i) => i.type === 'image' && !i.optional);
     const needVideos = wf.inputs.filter((i) => i.type === 'video' && !i.optional);
     if (refs.length < needImages.length || videos.length < needVideos.length) {
       const parts = [
-        needImages.length ? `${needImages.length} 张图片（${needImages.map((i) => i.label).join('、')}）` : '',
-        needVideos.length ? `${needVideos.length} 个视频` : '',
+        needImages.length ? t('{n} 张图片（{list}）', { n: needImages.length, list: list(needImages.map((i) => t(i.label))) }) : '',
+        needVideos.length ? t('{n} 个视频', { n: needVideos.length }) : '',
       ].filter(Boolean);
-      toast(`「${wf.name}」需要先在画布上选中 ${parts.join(' 和 ')}`, 'info');
+      toast(t('「{name}」需要先在画布上选中 {what}', { name: t(wf.name), what: parts.join(t(' 和 ')) }), 'info');
       return;
     }
     await runWorkflow(wf, {
@@ -395,7 +396,7 @@ export async function generateFromComposer() {
     return;
   }
   if (!text) {
-    toast('先写一句提示词吧', 'info');
+    toast(t('先写一句提示词吧'), 'info');
     return;
   }
   const first = refs[0]?.asset;
@@ -419,7 +420,7 @@ export async function generateFromComposer() {
   } else {
     const model = composer.videoModel as VideoModel;
     if (model === 'minimax-ref' && !refs.length) {
-      toast('多图参考需要先在画布上选中至少一张图片', 'info');
+      toast(t('多图参考需要先在画布上选中至少一张图片'), 'info');
       return;
     }
     const aspect = composer.videoAspect === 'auto' && !first ? '16:9' : composer.videoAspect;
@@ -515,7 +516,7 @@ export function reorder(ids: string[], where: 'front' | 'back') {
 /** Saves the frame currently shown by a video item as a new image next to it. */
 export async function captureFrame(item: CanvasItem) {
   const video = document.querySelector<HTMLVideoElement>(`[data-item-id="${item.id}"] video`);
-  if (!video || !video.videoWidth) return toast('视频还没加载好', 'info');
+  if (!video || !video.videoWidth) return toast(t('视频还没加载好'), 'info');
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -524,5 +525,5 @@ export async function captureFrame(item: CanvasItem) {
   if (!blob) return;
   const asset = await api.uploadAsset(blob, `frame-${Math.round(video.currentTime * 1000)}ms.png`);
   addAssets([asset], undefined, item);
-  toast('已截取当前帧', 'success');
+  toast(t('已截取当前帧'), 'success');
 }

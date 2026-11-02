@@ -14,6 +14,7 @@ import { LeftToolbar } from './ui/LeftToolbar';
 import { Lightbox } from './ui/Lightbox';
 import { Modals } from './ui/Modals';
 import { TopBar } from './ui/TopBar';
+import { lang, t } from './i18n';
 
 function Toasts() {
   const toasts = useStore((s) => s.toasts);
@@ -142,7 +143,12 @@ function onPaste(e: ClipboardEvent) {
 export function App() {
   useEffect(() => {
     const stopAutosave = setupAutosave();
-    bootstrap().catch((err) => toast(`加载画布失败：${(err as Error).message}`, 'error'));
+    bootstrap().catch((err) => toast(t('加载画布失败：{message}', { message: (err as Error).message }), 'error'));
+    // The server writes its messages and the assistant answers in the page's language.
+    void api
+      .settings()
+      .then((s) => (s.language !== lang ? api.saveSettings({ language: lang }) : undefined))
+      .catch(() => {});
     void loadWorkflows();
     void refreshCaps();
     const capsTimer = setInterval(() => void refreshCaps(), 60_000);

@@ -14,6 +14,8 @@ const { AgentHub } = await import('../server/agent/runtime.ts');
 type Task = import('../shared/types.ts').Task;
 type TaskRequest = import('../shared/types.ts').TaskRequest;
 type AssistantMessage = ReturnType<typeof fauxAssistantMessage>;
+/** A scripted reply, or a function of what the model was sent. */
+type Step = Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0][number];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,7 +52,7 @@ const projects = new ProjectStore();
 const assets = new AssetStore();
 await Promise.all([projects.init(), assets.init()]);
 
-async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: AssistantMessage[], opts: { compactAt?: number; commercial?: boolean } = {}) {
+async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; commercial?: boolean } = {}) {
   const faux = fauxProvider({ provider: 'faux', models: [{ id: 'faux-1', input: ['text', 'image'], contextWindow: 200_000 }] });
   faux.setResponses(responses);
   const models = createModels();
@@ -160,4 +162,30 @@ test('a long conversation is condensed into a summary, and the panel keeps the e
   const saved = JSON.parse(readFileSync(join(process.env.DATA_DIR!, 'agent', `${board.id}.json`), 'utf8'));
   assert.match(saved.messages[0].content, /^<canvas_summary>/);
   assert.ok(saved.messages.length < 14, `transcript shrank to ${saved.messages.length}`);
+});
+
+test('after switching to English, panel rows are in English and the model is told to answer in English', async () => {
+  const { setServerLang } = await import('../server/i18n.ts');
+  const board = await projects.create('english');
+  let seen = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    say('好的'),
+    (context) => {
+      seen = JSON.stringify(context);
+      return fauxAssistantMessage(fauxToolCall('write_note', { title: 'Script', content: '- Scene 1' }));
+    },
+    say('Done'),
+  ]);
+  await hub.send(board.id, { text: '你好' });
+  await settled(hub, board.id);
+  setServerLang('en');
+  try {
+    await hub.send(board.id, { text: 'Write a script' });
+    const view = await settled(hub, board.id);
+    assert.ok(seen.includes("The user's interface is in English"), 'the language rule reaches the model');
+    const row = view.entries.find((e) => e.kind === 'tool');
+    assert.ok(row?.kind === 'tool' && row.label === 'Write note' && row.summary === '"Script"', JSON.stringify(row));
+  } finally {
+    setServerLang('zh');
+  }
 });

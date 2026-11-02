@@ -4,8 +4,10 @@ import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../src/lib/g
 import type { AssetStore } from '../assets.ts';
 import type { ItemsPatch, ProjectStore } from '../projects.ts';
 import type { TaskManager } from '../tasks.ts';
-import { COMMERCIAL_BLOCK } from '../../shared/licenses.ts';
+import { msg } from '../../shared/i18n.ts';
+import { blockReason, isBlock } from '../../shared/licenses.ts';
 import { featureKey } from '../workflows/index.ts';
+import { list, t } from '../i18n.ts';
 
 /** What the agent needs from the server. */
 export interface CanvasDeps {
@@ -26,13 +28,13 @@ const LONG_SIDE: Record<MediaKind, number> = { image: 512, video: 640 };
 
 export async function readBoard(deps: CanvasDeps, projectId: string): Promise<Project> {
   const p = await deps.projects.get(projectId);
-  if (!p) throw new Error('画布不存在（可能已被删除）');
+  if (!p) throw new Error(t('画布不存在（可能已被删除）'));
   return p;
 }
 
 export async function patchBoard(deps: CanvasDeps, projectId: string, patch: ItemsPatch) {
   const p = await deps.projects.patchItems(projectId, patch);
-  if (!p) throw new Error('画布不存在（可能已被删除）');
+  if (!p) throw new Error(t('画布不存在（可能已被删除）'));
   deps.changed(p);
   return p;
 }
@@ -98,7 +100,7 @@ export function describeItem(deps: CanvasDeps, item: CanvasItem, promptChars = 8
 export function findItems(project: Project, ids: string[]): CanvasItem[] {
   return ids.map((id) => {
     const item = project.items.find((i) => i.id === id);
-    if (!item) throw new Error(`画布上没有 id 为 ${id} 的节点（用 read_board 查看现有节点）`);
+    if (!item) throw new Error(t('画布上没有 id 为 {id} 的节点（用 read_board 查看现有节点）', { id }));
     return item;
   });
 }
@@ -109,10 +111,12 @@ export function inputMedia(deps: CanvasDeps, items: CanvasItem[], kind: MediaKin
     const state = stateOf(deps, item);
     if (!state.done) {
       throw new Error(
-        state.finished ? `节点 ${item.id} 没有可用的结果（${state.text}）` : `节点 ${item.id} 还在生成（${state.text}），用 wait_for_items 等它完成再用`,
+        state.finished
+          ? t('节点 {id} 没有可用的结果（{state}）', { id: item.id, state: state.text })
+          : t('节点 {id} 还在生成（{state}），用 wait_for_items 等它完成再用', { id: item.id, state: state.text }),
       );
     }
-    if (state.media.kind !== kind) throw new Error(`节点 ${item.id} 是${state.media.kind === 'video' ? '视频' : '图片'}，这里需要${kind === 'video' ? '视频' : '图片'}`);
+    if (state.media.kind !== kind) throw new Error(kind === 'video' ? t('节点 {id} 是图片，这里需要视频', { id: item.id }) : t('节点 {id} 是视频，这里需要图片', { id: item.id }));
     return state.media;
   });
 }
@@ -120,11 +124,11 @@ export function inputMedia(deps: CanvasDeps, items: CanvasItem[], kind: MediaKin
 /** Fails early, with a reason, when the server cannot run a request. */
 export async function ensureRunnable(deps: CanvasDeps, request: TaskRequest) {
   const caps = await deps.capabilities();
-  if (!caps.comfyOnline) throw new Error('现在连不上 ComfyUI，等它恢复后再试');
+  if (!caps.comfyOnline) throw new Error(t('现在连不上 ComfyUI，等它恢复后再试'));
   const missing = caps.features[featureKey(request)] ?? [];
-  const blocked = missing.filter((m) => m.startsWith(COMMERCIAL_BLOCK)).map((m) => m.slice(COMMERCIAL_BLOCK.length));
-  if (blocked.length) throw new Error(`用户开启了「只用可商用的模型」，这个工具不能用：${blocked.join('；')}。换用可商用的模型或模板（list_workflows 里有标注）`);
-  if (missing.length) throw new Error(`ComfyUI 服务器缺少：${missing.join('、')}`);
+  const blocked = missing.filter(isBlock).map((m) => blockReason(m, t));
+  if (blocked.length) throw new Error(t('用户开启了「只用可商用的模型」，这个工具不能用：{reasons}。换用可商用的模型或模板（list_workflows 里有标注）', { reasons: blocked.join('; ') }));
+  if (missing.length) throw new Error(t('ComfyUI 服务器缺少：{list}', { list: list(missing) }));
 }
 
 export interface BatchJob {
@@ -224,15 +228,15 @@ export async function launch(
 ): Promise<{ items: CanvasItem[]; error?: string }> {
   const jobs = Array.from({ length: opts.count }, () => ({ request: opts.request, inputs: opts.inputs, name: opts.name }));
   const { items, failed } = await launchBatch(deps, writer, projectId, jobs, { layout: 'row', view: opts.view });
-  if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
+  if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
   return { items, error: failed[0]?.error };
 }
 
 /** A placeholder with its finished task's result (or error) filled in, as the page does it. */
 function resolved(item: CanvasItem, task: Task): CanvasItem {
-  if (task.status !== 'done') return { ...item, error: task.status === 'cancelled' ? '已取消' : (task.error ?? '生成失败') };
+  if (task.status !== 'done') return { ...item, error: task.status === 'cancelled' ? msg('已取消') : (task.error ?? msg('生成失败')) };
   const asset = task.results[item.resultIndex ?? 0] ?? task.results[0];
-  if (!asset) return { ...item, taskId: undefined, error: '没有返回结果' };
+  if (!asset) return { ...item, taskId: undefined, error: msg('没有返回结果') };
   const h = Math.round(item.w / (asset.width / asset.height));
   return { ...item, kind: asset.kind, taskId: undefined, error: undefined, asset, h, y: Math.round(item.y + (item.h - h) / 2) };
 }

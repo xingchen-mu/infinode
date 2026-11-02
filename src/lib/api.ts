@@ -13,6 +13,7 @@ import type {
   TaskRequest,
   WorkflowDraft,
 } from '../../shared/types';
+import { t } from '../i18n';
 
 export type WorkflowData = Omit<CustomWorkflow, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -38,7 +39,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(path, init);
   } catch {
-    throw new Error('无法连接本地服务，请确认 npm run dev 正在运行');
+    throw new Error(t('无法连接本地服务，请确认 npm run dev 正在运行'));
   }
   const text = await res.text();
   let data: unknown;
@@ -47,7 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     data = undefined;
   }
-  const message = (data as { error?: string })?.error ?? `请求失败 (${res.status})`;
+  const message = (data as { error?: string })?.error ?? t('请求失败 ({status})', { status: res.status });
   if (res.status === 409 && (data as { project?: Project })?.project) throw new ConflictError(message, (data as { project: Project }).project);
   if (!res.ok) throw new Error(message);
   return data as T;

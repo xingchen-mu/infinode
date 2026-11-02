@@ -4,6 +4,7 @@ import { type BuiltWorkflow, type InputFile, fitPixels, parseAspect, sizeForAspe
 import { qwenErase, qwenGenerate, qwenInpaint, qwenOutpaint, qwenRemoveBackground, seedvr2Upscale, zimageGenerate } from './image.ts';
 import { REQUIREMENTS } from './models.ts';
 import { minimaxGenerate, minimaxReference } from './video.ts';
+import { t } from '../i18n.ts';
 
 export { REQUIREMENTS };
 
@@ -61,15 +62,15 @@ function clampText(s: string | undefined, max = 4000) {
 }
 
 function requirePrompt(s: string | undefined) {
-  const t = clampText(s);
-  if (!t) throw new RequestError('请输入提示词');
-  return t;
+  const text = clampText(s);
+  if (!text) throw new RequestError(t('请输入提示词'));
+  return text;
 }
 
 function aspectOrNull(aspect: string | undefined): number | null {
   if (!aspect || aspect === 'auto') return null;
   const r = parseAspect(aspect);
-  if (!r || r < 0.2 || r > 5) throw new RequestError(`无效的画面比例: ${aspect}`);
+  if (!r || r < 0.2 || r > 5) throw new RequestError(t('无效的画面比例: {aspect}', { aspect }));
   return r;
 }
 
@@ -83,7 +84,7 @@ export function buildWorkflow(
   switch (req.op) {
     case 'custom': {
       const wf = getWorkflow(req.workflow);
-      if (!wf) throw new RequestError('这个工作流已被删除');
+      if (!wf) throw new RequestError(t('这个工作流已被删除'));
       try {
         return buildCustom(wf, { ...req, prompt: clampText(req.prompt), negative: clampText(req.negative) }, { images: files.images, videos: files.videos ?? [], mask: files.mask }, seed);
       } catch (err) {
@@ -111,26 +112,26 @@ export function buildWorkflow(
           maxSide: quality === '2k' ? 2048 : 1024,
         });
       }
-      throw new RequestError(`未知图片模型: ${String((req as { model: unknown }).model)}`);
+      throw new RequestError(t('未知图片模型: {model}', { model: String((req as { model: unknown }).model) }));
     }
     case 'image.inpaint':
-      if (!first || !files.mask) throw new RequestError('缺少图片或蒙版');
+      if (!first || !files.mask) throw new RequestError(t('缺少图片或蒙版'));
       return qwenInpaint({ image: first, mask: files.mask, prompt: requirePrompt(req.prompt), seed });
     case 'image.erase':
-      if (!first || !files.mask) throw new RequestError('缺少图片或蒙版');
+      if (!first || !files.mask) throw new RequestError(t('缺少图片或蒙版'));
       return qwenErase({ image: first, mask: files.mask, seed });
     case 'image.outpaint': {
-      if (!first) throw new RequestError('缺少图片');
+      if (!first) throw new RequestError(t('缺少图片'));
       const pads = [req.left, req.top, req.right, req.bottom].map((v) => Math.max(0, Math.round(Number(v) || 0)));
-      if (pads.every((v) => v === 0)) throw new RequestError('请拖动边框设置扩展范围');
+      if (pads.every((v) => v === 0)) throw new RequestError(t('请拖动边框设置扩展范围'));
       const [left, top, right, bottom] = pads;
       return qwenOutpaint({ image: first, left, top, right, bottom, prompt: clampText(req.prompt), seed });
     }
     case 'image.removeBg':
-      if (!first) throw new RequestError('缺少图片');
+      if (!first) throw new RequestError(t('缺少图片'));
       return qwenRemoveBackground({ image: first, seed });
     case 'image.upscale': {
-      if (!first) throw new RequestError('缺少图片');
+      if (!first) throw new RequestError(t('缺少图片'));
       const scale = Math.min(4, Math.max(1.25, Number(req.scale) || 2));
       return seedvr2Upscale({ image: first, scale, seed });
     }
@@ -143,7 +144,7 @@ export function buildWorkflow(
         const seconds = Math.min(15, Math.max(2, Number(req.duration) || 5));
         const mp = VIDEO_MP[quality];
         if (req.model === 'minimax-ref') {
-          if (!files.images.length) throw new RequestError('多图参考需要至少一张参考图');
+          if (!files.images.length) throw new RequestError(t('多图参考需要至少一张参考图'));
           const size = sizeForAspect(ratio ?? first.width / first.height, mp, 32);
           return minimaxReference({ prompt: convertImageRefs(prompt, 'minimax'), seconds, seed, images: files.images, ...size });
         }
@@ -157,9 +158,9 @@ export function buildWorkflow(
           last: second,
         });
       }
-      throw new RequestError(`未知视频模型: ${String((req as { model: unknown }).model)}`);
+      throw new RequestError(t('未知视频模型: {model}', { model: String((req as { model: unknown }).model) }));
     }
     default:
-      throw new RequestError(`未知操作: ${(req as { op: string }).op}`);
+      throw new RequestError(t('未知操作: {op}', { op: (req as { op: string }).op }));
   }
 }

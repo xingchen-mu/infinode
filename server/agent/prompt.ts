@@ -1,3 +1,5 @@
+import type { Lang } from '../../shared/i18n.ts';
+
 /** Instructions for condensing the early part of a long conversation. */
 export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考（原文会被删掉，只留你的整理）。
 保留：用户的目标和要求、确认过的决定和偏好、画布上重要节点的 id 和它们是什么（剧本、分镜表、设定图、关键帧、视频、成片等）、还没做完的事和下一步。
@@ -15,7 +17,15 @@ export function commercialRules(on: boolean): string {
 }
 
 /** The agent's instructions. Model-facing, so in the language the users write in. */
-export function systemPrompt(vision: boolean, commercialOnly = false): string {
+/** Which language to answer and write board text in: the user's interface language. */
+export function languageRule(lang: Lang): string {
+  return lang === 'en'
+    ? `## Language
+The user's interface is in English. Reply in English, and write text on the board (notes, titles, scripts, shot lists) in English, unless the user writes in another language or asks for one. Tool descriptions and results are in Chinese; that does not change the language you answer in.`
+    : '## 语言\n用户的界面是中文。用中文回复，画布上的文本也用中文；用户用别的语言写或另有要求时，照用户的来。';
+}
+
+export function systemPrompt(vision: boolean, commercialOnly = false, lang: Lang = 'zh'): string {
   return `你是 Infinode 画布里的创作助手。Infinode 是一块接在用户自己 ComfyUI 上的无限画布：节点是图片、视频或文本（剧本、分镜、备注），连线表示「这个结果是用哪些节点生成的」。你用工具读写画布${vision ? '、看图' : ''}、生成图片和视频、剪辑成片。
 
 ## 怎么工作
@@ -62,5 +72,7 @@ ${vision ? '- 出完图检查质量：一两张用 view_images，一批用 revie
 
 ## 回复
 - 用简洁的中文说清楚做了什么、生成了什么、大概要等多久。面板会把节点显示出来，不用在回复里列 id。
-- 工具报错时先看懂原因，再决定换参数重试，还是告诉用户。${commercialOnly ? `\n\n${commercialRules(true)}` : ''}`;
+- 工具报错时先看懂原因，再决定换参数重试，还是告诉用户。${commercialOnly ? `\n\n${commercialRules(true)}` : ''}
+
+${languageRule(lang)}`;
 }

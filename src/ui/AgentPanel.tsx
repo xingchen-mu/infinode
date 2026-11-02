@@ -1,4 +1,4 @@
-import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, Square, SquarePen, X } from 'lucide-react';
+import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, Square, SquarePen, StickyNote, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { thumbUrl } from '../../shared/media';
@@ -9,13 +9,14 @@ import { boundsOf, viewportCenter } from '../lib/geometry';
 import { savePending } from '../project';
 import { select, toast, useStore } from '../store';
 import { Markdown } from './Markdown';
+import { lang, t } from '../i18n';
 
 const OPEN_KEY = 'infinode:agent';
 
 /** Tools whose results are new board items worth bringing into view. */
 const CREATES = new Set(['generate_image', 'generate_video', 'run_workflow']);
 
-const SUGGESTIONS = ['把选中的图各做一段 5 秒视频', '用选中的人物图，生成他在雨夜街头的三张不同景别的照片', '看看选中的图有没有问题，有问题就重新生成'];
+const SUGGESTIONS = [t('把选中的图各做一段 5 秒视频'), t('用选中的人物图，生成他在雨夜街头的三张不同景别的照片'), t('看看选中的图有没有问题，有问题就重新生成')];
 
 interface AgentState {
   open: boolean;
@@ -105,26 +106,28 @@ async function stop() {
 
 async function clear() {
   const { projectId, running } = useAgent.getState();
-  if (!projectId || !confirm(running ? '助手还在工作，停止并清空这段对话？' : '清空这段对话？画布上的内容不受影响。')) return;
+  if (!projectId || !confirm(running ? t('助手还在工作，停止并清空这段对话？') : t('清空这段对话？画布上的内容不受影响。'))) return;
   await api.clearAgent(projectId).catch((err) => toast((err as Error).message, 'error'));
 }
 
 function focusItems(ids: string[]) {
   const items = useStore.getState().items.filter((i) => ids.includes(i.id));
   const bounds = boundsOf(items);
-  if (!bounds) return toast('这些节点已经不在画布上了', 'info');
+  if (!bounds) return toast(t('这些节点已经不在画布上了'), 'info');
   select(items.map((i) => i.id));
   ensureVisible(bounds);
 }
 
 function ItemChip({ id }: { id: string }) {
   const item = useStore((s) => s.items.find((i) => i.id === id));
-  if (!item) return <span className="agent-chip gone" title="已不在画布上" />;
+  if (!item) return <span className="agent-chip gone" title={t('已不在画布上')} />;
   const media = item.asset;
   return (
-    <button className="agent-chip" title={item.name ?? '在画布上查看'} onClick={() => focusItems([id])}>
+    <button className="agent-chip" title={item.name ?? t('在画布上查看')} onClick={() => focusItems([id])}>
       {media ? (
         <img src={thumbUrl(media.url)} alt="" />
+      ) : item.kind === 'text' ? (
+        <StickyNote />
       ) : item.error ? (
         <CircleAlert className="bad" />
       ) : (
@@ -222,10 +225,10 @@ function Approval({ id, approval }: { id: string; approval: { title: string; det
       <span>{approval.detail}</span>
       <div className="agent-approval-bar">
         <button className="btn ghost small" disabled={busy} onClick={() => void answer(false)}>
-          不要
+          {t('不要')}
         </button>
         <button className="btn primary small" disabled={busy} onClick={() => void answer(true)}>
-          开始
+          {t('开始')}
         </button>
       </div>
     </div>
@@ -236,15 +239,17 @@ export function AgentButton() {
   const open = useAgent((s) => s.open);
   const running = useAgent((s) => s.running);
   return (
-    <button className={`pill ${open ? 'on' : ''} ${running ? 'busy' : ''}`} onClick={() => toggleAgent()} title="画布助手：说一句话，让它在画布上出图、出视频">
-      {running ? <Loader2 className="spin" /> : <Sparkles />} 助手
+    <button className={`pill ${open ? 'on' : ''} ${running ? 'busy' : ''}`} onClick={() => toggleAgent()} title={t('画布助手：说一句话，让它在画布上出图、出视频')}>
+      {running ? <Loader2 className="spin" /> : <Sparkles />} {t('助手')}
     </button>
   );
 }
 
-/** "1.2 万 tokens · $0.003" */
+const compact = new Intl.NumberFormat(lang === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumFractionDigits: 1 });
+
+/** "1.2万 tokens · $0.003" / "12.3K tokens · $0.003" */
 function usageText(u: AgentUsage): string {
-  const tokens = u.tokens >= 10_000 ? `${(u.tokens / 10_000).toFixed(1)} 万` : String(u.tokens);
+  const tokens = compact.format(u.tokens);
   return `${tokens} tokens${u.cost > 0 ? ` · $${u.cost.toFixed(u.cost < 0.1 ? 3 : 2)}` : ''}`;
 }
 
@@ -274,18 +279,18 @@ export function AgentPanel() {
     <div className="agent-panel" data-ui>
       <div className="agent-head">
         <Sparkles className="agent-logo" />
-        <span className="agent-title">画布助手</span>
+        <span className="agent-title">{t('画布助手')}</span>
         {status?.model && <span className="agent-model">{status.model.split('/').pop()}</span>}
         <span className="agent-head-gap" />
         {usage.tokens > 0 && (
-          <span className="agent-usage" title="这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）">
+          <span className="agent-usage" title={t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）')}>
             {usageText(usage)}
           </span>
         )}
-        <button className="icon-btn small" title="新对话" onClick={() => void clear()} disabled={!entries.length}>
+        <button className="icon-btn small" title={t('新对话')} onClick={() => void clear()} disabled={!entries.length}>
           <SquarePen />
         </button>
-        <button className="icon-btn small" title="收起" onClick={() => toggleAgent(false)}>
+        <button className="icon-btn small" title={t('收起')} onClick={() => toggleAgent(false)}>
           <X />
         </button>
       </div>
@@ -302,7 +307,7 @@ export function AgentPanel() {
         {!entries.length && (
           <div className="agent-empty">
             <Sparkles />
-            <p>说说你想做什么，助手会在画布上出图、出视频，并把结果连到用到的节点上。</p>
+            <p>{t('说说你想做什么，助手会在画布上出图、出视频，并把结果连到用到的节点上。')}</p>
             {SUGGESTIONS.map((s) => (
               <button key={s} className="agent-suggest" onClick={() => useAgent.setState({ draft: s })}>
                 {s}
@@ -315,7 +320,7 @@ export function AgentPanel() {
         ))}
         {thinking && (
           <div className="agent-thinking">
-            <Loader2 className="spin" /> 思考中…
+            <Loader2 className="spin" /> {t('思考中…')}
           </div>
         )}
       </div>
@@ -331,7 +336,7 @@ export function AgentPanel() {
           value={draft}
           rows={3}
           disabled={!ready}
-          placeholder={selected ? `会带上选中的 ${selected} 个节点` : '想让助手做什么？'}
+          placeholder={selected ? t('会带上选中的 {n} 个节点', { n: selected }) : t('想让助手做什么？')}
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -341,14 +346,14 @@ export function AgentPanel() {
           }}
         />
         <div className="agent-input-bar">
-          <span className="agent-hint">{running ? '工作中，可以继续补充要求' : 'Enter 发送 · Shift+Enter 换行'}</span>
+          <span className="agent-hint">{running ? t('工作中，可以继续补充要求') : t('Enter 发送 · Shift+Enter 换行')}</span>
           {running && (
             <button className="btn ghost small" onClick={() => void stop()}>
-              <Square /> 停止
+              <Square /> {t('停止')}
             </button>
           )}
           <button className="btn primary small" disabled={!ready || !draft.trim()} onClick={() => void send()}>
-            <ArrowUp /> 发送
+            <ArrowUp /> {t('发送')}
           </button>
         </div>
       </div>

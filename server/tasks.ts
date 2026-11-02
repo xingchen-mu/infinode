@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { AssetInfo, CustomWorkflow, Task, TaskRequest } from '../shared/types.ts';
 import { type AssetStore, type StoredAsset, mimeFor, publicAsset } from './assets.ts';
-import { type ComfyClient, type ComfyEvent, historyError, historyFiles } from './comfy.ts';
+import { type ComfyClient, type ComfyEvent, INTERRUPTED, historyError, historyFiles } from './comfy.ts';
 import { config } from './config.ts';
 import { type BuiltWorkflow, type Stage, randomSeed } from './workflows/graph.ts';
 import { fixModelPaths } from './workflows/custom.ts';
 import { RequestError, buildWorkflow, requestAssets } from './workflows/index.ts';
+import { t } from './i18n.ts';
 
 type ObjectInfo = Parameters<typeof fixModelPaths>[1];
 
@@ -38,9 +39,9 @@ const LOADER_TYPES = /Loader|LoadImage|LoadVideo/;
 /** ComfyUI exceptions → something a user can act on. */
 function friendlyError(raw: string): string {
   const msg = raw.trim();
-  if (/out of memory|OutOfMemory|CUDA error: out of memory/i.test(msg)) return '显存不足：试试降低分辨率或时长，或等其它任务结束后重试';
-  if (/fp8e4nv not supported/i.test(msg)) return '这个模型需要 fp8 计算，当前服务器 GPU 在 triton 后端下不支持';
-  if (/Invalid image file|No such file|not found/i.test(msg) && /LoadImage|image/i.test(msg)) return `输入图片在 ComfyUI 上找不到了，请重试（${msg.slice(0, 120)}）`;
+  if (/out of memory|OutOfMemory|CUDA error: out of memory/i.test(msg)) return t('显存不足：试试降低分辨率或时长，或等其它任务结束后重试');
+  if (/fp8e4nv not supported/i.test(msg)) return t('这个模型需要 fp8 计算，当前服务器 GPU 在 triton 后端下不支持');
+  if (/Invalid image file|No such file|not found/i.test(msg) && /LoadImage|image/i.test(msg)) return t('输入图片在 ComfyUI 上找不到了，请重试（{detail}）', { detail: msg.slice(0, 120) });
   return msg.length > 300 ? `${msg.slice(0, 300)}…` : msg;
 }
 const MAX_KEPT = 400;
@@ -67,8 +68,8 @@ export class TaskManager extends EventEmitter {
   async init() {
     try {
       const tasks = JSON.parse(await readFile(this.file, 'utf8')) as (Task & { stages?: Stage[]; outputNode?: string; outputNodes?: string[] })[];
-      for (const t of tasks) {
-        const { stages = [], outputNode, outputNodes, ...task } = t;
+      for (const job of tasks) {
+        const { stages = [], outputNode, outputNodes, ...task } = job;
         this.tracked.set(task.id, {
           task,
           stages,
@@ -78,7 +79,7 @@ export class TaskManager extends EventEmitter {
           lastEventAt: 0,
         });
         if (task.promptId) this.byPrompt.set(task.promptId, task.id);
-        else if (ACTIVE.has(task.status)) Object.assign(task, { status: 'error', error: '提交过程中服务重启了，请重试', stage: '失败' });
+        else if (ACTIVE.has(task.status)) Object.assign(task, { status: 'error', error: t('提交过程中服务重启了，请重试'), stage: t('失败') });
       }
     } catch {
       /* first run */
@@ -87,23 +88,23 @@ export class TaskManager extends EventEmitter {
   }
 
   list(ids?: string[]): Task[] {
-    if (ids) return ids.map((id) => this.tracked.get(id)?.task).filter((t): t is Task => Boolean(t));
-    return [...this.tracked.values()].map((t) => t.task);
+    if (ids) return ids.map((id) => this.tracked.get(id)?.task).filter((job): job is Task => Boolean(job));
+    return [...this.tracked.values()].map((job) => job.task);
   }
 
   active(): Task[] {
-    return this.list().filter((t) => ACTIVE.has(t.status));
+    return this.list().filter((job) => ACTIVE.has(job.status));
   }
 
   /** `id` may be chosen by the client so a placeholder can reference the task before this returns. */
   async create(req: TaskRequest, id?: string): Promise<Task> {
-    if (id !== undefined && (!/^[\w-]{6,32}$/.test(id) || this.tracked.has(id))) throw new RequestError('任务 id 无效');
+    if (id !== undefined && (!/^[\w-]{6,32}$/.test(id) || this.tracked.has(id))) throw new RequestError(t('任务 id 无效'));
     const seed = Number.isSafeInteger(req.seed) && req.seed! >= 0 ? req.seed! : randomSeed();
     const refs = requestAssets(req);
     const lookup = (kind: 'image' | 'video') => (id: string) => {
       const a = this.assets.get(id);
-      if (!a) throw new RequestError('引用的素材不存在，可能已被删除');
-      if (a.kind !== kind) throw new RequestError(kind === 'image' ? '这里只能使用图片' : '这里只能使用视频');
+      if (!a) throw new RequestError(t('引用的素材不存在，可能已被删除'));
+      if (a.kind !== kind) throw new RequestError(kind === 'image' ? t('这里只能使用图片') : t('这里只能使用视频'));
       return a;
     };
     const imageAssets = refs.images.map(lookup('image'));
@@ -125,47 +126,47 @@ export class TaskManager extends EventEmitter {
       request: req,
       status: 'queued',
       progress: 0,
-      stage: imageAssets.length || videoAssets.length ? '上传素材' : '提交中',
+      stage: imageAssets.length || videoAssets.length ? t('上传素材') : t('提交中'),
       expected: draft.expected,
       results: [],
       seed,
       createdAt: Date.now(),
     };
-    const t: Tracked = { task, stages: draft.stages, done: new Set(), currentFrac: 0, lastEventAt: Date.now() };
-    this.tracked.set(task.id, t);
+    const job: Tracked = { task, stages: draft.stages, done: new Set(), currentFrac: 0, lastEventAt: Date.now() };
+    this.tracked.set(task.id, job);
     this.prune();
-    this.emitTask(t);
+    this.emitTask(job);
 
     try {
       let promptId: string;
       try {
-        promptId = await this.submit(t, req, seed, imageAssets, videoAssets, maskAsset, false);
+        promptId = await this.submit(job, req, seed, imageAssets, videoAssets, maskAsset, false);
       } catch (err) {
         // ComfyUI's input folder may have been cleaned: upload again and retry once.
         if (!(err instanceof Error) || !/image|file|video/i.test(err.message) || !(imageAssets.length || videoAssets.length)) throw err;
-        promptId = await this.submit(t, req, seed, imageAssets, videoAssets, maskAsset, true);
+        promptId = await this.submit(job, req, seed, imageAssets, videoAssets, maskAsset, true);
       }
       task.promptId = promptId;
-      t.lastEventAt = Date.now();
+      job.lastEventAt = Date.now();
       if (!ACTIVE.has(task.status)) {
         // Cancelled while uploading.
         await this.comfy.deleteQueued([promptId]).catch(() => {});
-        this.emitTask(t);
+        this.emitTask(job);
       } else if (task.status === 'queued') {
-        this.update(t, { stage: '排队中' });
+        this.update(job, { stage: t('排队中') });
         this.refreshQueueSoon();
       } else {
-        this.emitTask(t);
+        this.emitTask(job);
       }
       return task;
     } catch (err) {
-      this.finish(t, { status: 'error', error: friendlyError((err as Error).message), stage: '失败' });
+      this.finish(job, { status: 'error', error: friendlyError((err as Error).message), stage: t('失败') });
       throw err;
     }
   }
 
   private async submit(
-    t: Tracked,
+    job: Tracked,
     req: TaskRequest,
     seed: number,
     imageAssets: StoredAsset[],
@@ -186,21 +187,21 @@ export class TaskManager extends EventEmitter {
     // Imported workflows name models as their author had them; use what this server has.
     const info = req.op === 'custom' ? this.getObjectInfo() : undefined;
     if (info) fixModelPaths(wf.graph, info);
-    t.graph = wf.graph;
-    t.outputNodes = wf.outputNodes;
-    t.nodeCount = Object.keys(wf.graph).length;
-    t.stages = wf.stages;
+    job.graph = wf.graph;
+    job.outputNodes = wf.outputNodes;
+    job.nodeCount = Object.keys(wf.graph).length;
+    job.stages = wf.stages;
     // Registered before sending so events that beat the HTTP reply still find the task.
     const promptId = randomUUID();
-    this.byPrompt.set(promptId, t.task.id);
+    this.byPrompt.set(promptId, job.task.id);
     try {
       await this.comfy.queuePrompt(wf.graph, promptId);
     } catch (err) {
       // ComfyUI's HTTP server can stall for a minute while it loads models from a slow disk.
       // A timed-out reply does not mean the prompt was rejected: keep the id and let poll() find out.
       if (/timeout|aborted/i.test((err as Error).message)) {
-        t.unconfirmedSince = Date.now();
-        this.update(t, { stage: '已提交，ComfyUI 响应较慢…' });
+        job.unconfirmedSince = Date.now();
+        this.update(job, { stage: t('已提交，ComfyUI 响应较慢…') });
         return promptId;
       }
       this.byPrompt.delete(promptId);
@@ -218,22 +219,22 @@ export class TaskManager extends EventEmitter {
   }
 
   async cancel(id: string): Promise<Task | undefined> {
-    const t = this.tracked.get(id);
-    if (!t || !ACTIVE.has(t.task.status)) return t?.task;
-    if (!t.task.promptId) {
+    const job = this.tracked.get(id);
+    if (!job || !ACTIVE.has(job.task.status)) return job?.task;
+    if (!job.task.promptId) {
       // Still uploading; create() drops the prompt once it is queued.
-      this.finish(t, { status: 'cancelled', stage: '已取消' });
-      return t.task;
+      this.finish(job, { status: 'cancelled', stage: t('已取消') });
+      return job.task;
     }
-    const wasRunning = t.task.status === 'running';
-    this.finish(t, { status: 'cancelled', stage: '已取消' });
+    const wasRunning = job.task.status === 'running';
+    this.finish(job, { status: 'cancelled', stage: t('已取消') });
     try {
-      if (wasRunning) await this.comfy.interrupt(t.task.promptId);
-      else await this.comfy.deleteQueued([t.task.promptId]);
+      if (wasRunning) await this.comfy.interrupt(job.task.promptId);
+      else await this.comfy.deleteQueued([job.task.promptId]);
     } catch {
       /* the prompt may have finished meanwhile */
     }
-    return t.task;
+    return job.task;
   }
 
   /** Handles a ComfyUI websocket event. */
@@ -243,54 +244,54 @@ export class TaskManager extends EventEmitter {
       return;
     }
     const promptId = e.data?.prompt_id as string | undefined;
-    const t = promptId ? this.tracked.get(this.byPrompt.get(promptId) ?? '') : undefined;
-    if (!t || !ACTIVE.has(t.task.status)) return;
-    t.lastEventAt = Date.now();
+    const job = promptId ? this.tracked.get(this.byPrompt.get(promptId) ?? '') : undefined;
+    if (!job || !ACTIVE.has(job.task.status)) return;
+    job.lastEventAt = Date.now();
     switch (e.type) {
       case 'execution_start':
-        this.update(t, { status: 'running', startedAt: Date.now(), stage: '准备中', queuePosition: undefined });
+        this.update(job, { status: 'running', startedAt: Date.now(), stage: t('准备中'), queuePosition: undefined });
         this.refreshQueueSoon();
         break;
       case 'execution_cached':
-        for (const n of (e.data.nodes as string[]) ?? []) t.done.add(String(n));
-        this.recompute(t);
+        for (const n of (e.data.nodes as string[]) ?? []) job.done.add(String(n));
+        this.recompute(job);
         break;
       case 'executing': {
-        if (t.current) t.done.add(t.current);
+        if (job.current) job.done.add(job.current);
         const node = e.data.node == null ? undefined : String(e.data.node);
-        t.current = node;
-        t.currentFrac = 0;
+        job.current = node;
+        job.currentFrac = 0;
         if (node) {
-          const stage = t.stages.find((s) => s.node === node);
-          const type = t.graph?.[node]?.class_type ?? '';
-          const label = stage?.label ?? (LOADER_TYPES.test(type) || /TextEncode/.test(type) ? '加载模型' : undefined);
-          if (t.task.status !== 'running') t.task.status = 'running';
-          this.recompute(t, label);
+          const stage = job.stages.find((s) => s.node === node);
+          const type = job.graph?.[node]?.class_type ?? '';
+          const label = stage?.label ?? (LOADER_TYPES.test(type) || /TextEncode/.test(type) ? t('加载模型') : undefined);
+          if (job.task.status !== 'running') job.task.status = 'running';
+          this.recompute(job, label);
         }
         break;
       }
       case 'progress': {
-        const node = String(e.data.node ?? t.current ?? '');
-        if (node && node !== t.current) {
-          if (t.current) t.done.add(t.current);
-          t.current = node;
+        const node = String(e.data.node ?? job.current ?? '');
+        if (node && node !== job.current) {
+          if (job.current) job.done.add(job.current);
+          job.current = node;
         }
         const max = Number(e.data.max) || 1;
-        t.currentFrac = Math.min(1, Number(e.data.value) / max);
-        const stage = t.stages.find((s) => s.node === node);
-        this.recompute(t, stage ? `${stage.label} ${Math.round(t.currentFrac * 100)}%` : undefined);
+        job.currentFrac = Math.min(1, Number(e.data.value) / max);
+        const stage = job.stages.find((s) => s.node === node);
+        this.recompute(job, stage ? `${stage.label} ${Math.round(job.currentFrac * 100)}%` : undefined);
         break;
       }
       case 'execution_success':
-        void this.finalize(t);
+        void this.finalize(job);
         break;
       case 'execution_error': {
         const d = e.data as { exception_message?: string; node_type?: string };
-        this.finish(t, { status: 'error', error: friendlyError(`${d.node_type ?? ''} ${d.exception_message ?? '执行失败'}`), stage: '失败' });
+        this.finish(job, { status: 'error', error: friendlyError(`${d.node_type ?? ''} ${d.exception_message ?? t('执行失败')}`), stage: t('失败') });
         break;
       }
       case 'execution_interrupted':
-        this.finish(t, { status: 'cancelled', stage: '已中断' });
+        this.finish(job, { status: 'cancelled', stage: t('已中断') });
         break;
     }
   }
@@ -300,42 +301,43 @@ export class TaskManager extends EventEmitter {
     void this.poll(true);
   }
 
-  private recompute(t: Tracked, stage?: string) {
+  private recompute(job: Tracked, stage?: string) {
     let ratio: number;
-    if (t.stages.length) {
-      const total = t.stages.reduce((s, x) => s + x.weight, 0) || 1;
+    if (job.stages.length) {
+      const total = job.stages.reduce((s, x) => s + x.weight, 0) || 1;
       let p = 0;
-      for (const s of t.stages) {
-        if (t.done.has(s.node)) p += s.weight;
-        else if (s.node === t.current) p += s.weight * t.currentFrac;
+      for (const s of job.stages) {
+        if (job.done.has(s.node)) p += s.weight;
+        else if (s.node === job.current) p += s.weight * job.currentFrac;
       }
       ratio = p / total;
     } else {
       // No known heavy nodes: count finished nodes.
-      ratio = (t.done.size + t.currentFrac) / Math.max(1, t.nodeCount ?? t.done.size + 1);
+      ratio = (job.done.size + job.currentFrac) / Math.max(1, job.nodeCount ?? job.done.size + 1);
     }
-    const progress = Math.max(t.task.progress, Math.min(0.99, ratio));
-    this.update(t, { progress, ...(stage ? { stage } : {}) });
+    const progress = Math.max(job.task.progress, Math.min(0.99, ratio));
+    this.update(job, { progress, ...(stage ? { stage } : {}) });
   }
 
-  private async finalize(t: Tracked) {
-    if (t.finalizing || !t.task.promptId) return;
-    t.finalizing = true;
+  private async finalize(job: Tracked) {
+    if (job.finalizing || !job.task.promptId) return;
+    job.finalizing = true;
     try {
-      const entry = await this.comfy.history(t.task.promptId);
+      const entry = await this.comfy.history(job.task.promptId);
       if (!entry) {
-        t.finalizing = false;
+        job.finalizing = false;
         return;
       }
       const err = historyError(entry);
       if (err) {
-        this.finish(t, { status: err === '已中断' ? 'cancelled' : 'error', error: friendlyError(err), stage: err === '已中断' ? err : '失败' });
+        const interrupted = err === INTERRUPTED;
+        this.finish(job, { status: interrupted ? 'cancelled' : 'error', error: interrupted ? t('已中断') : friendlyError(err), stage: interrupted ? t('已中断') : t('失败') });
         return;
       }
-      this.update(t, { stage: '保存结果', progress: 0.99 });
+      this.update(job, { stage: t('保存结果'), progress: 0.99 });
       // Only files the board can show (skips audio, text, latents…).
-      const files = historyFiles(entry, t.outputNodes).filter((f) => mimeFor(f.filename));
-      if (!files.length) throw new Error('ComfyUI 没有返回可显示的图片或视频，检查工作流的输出节点');
+      const files = historyFiles(entry, job.outputNodes).filter((f) => mimeFor(f.filename));
+      if (!files.length) throw new Error(t('ComfyUI 没有返回可显示的图片或视频，检查工作流的输出节点'));
       const results: AssetInfo[] = [];
       for (const f of files) {
         const data = await this.comfy.view(f);
@@ -343,57 +345,57 @@ export class TaskManager extends EventEmitter {
         const asset = await this.assets.save(data, {
           filename: f.filename,
           // Video size is only a guess here; the page measures it on load.
-          size: isVideo ? { width: t.task.expected.width, height: t.task.expected.height } : undefined,
+          size: isVideo ? { width: job.task.expected.width, height: job.task.expected.height } : undefined,
           // LoadImage can read ComfyUI's own output folder, so follow-up edits need no upload.
           comfyName: `${f.subfolder ? `${f.subfolder}/` : ''}${f.filename} [${f.type || 'output'}]`,
         });
         results.push(publicAsset(asset));
       }
-      this.finish(t, { status: 'done', results, progress: 1, stage: '完成' });
+      this.finish(job, { status: 'done', results, progress: 1, stage: t('完成') });
     } catch (err) {
-      this.finish(t, { status: 'error', error: `获取结果失败: ${(err as Error).message}`, stage: '失败' });
+      this.finish(job, { status: 'error', error: t('获取结果失败: {message}', { message: (err as Error).message }), stage: t('失败') });
     } finally {
-      t.finalizing = false;
+      job.finalizing = false;
     }
   }
 
-  private finish(t: Tracked, patch: Partial<Task>) {
-    t.graph = undefined;
-    this.update(t, { ...patch, finishedAt: Date.now(), queuePosition: undefined });
+  private finish(job: Tracked, patch: Partial<Task>) {
+    job.graph = undefined;
+    this.update(job, { ...patch, finishedAt: Date.now(), queuePosition: undefined });
   }
 
-  private update(t: Tracked, patch: Partial<Task>) {
-    Object.assign(t.task, patch);
-    this.emitTask(t);
+  private update(job: Tracked, patch: Partial<Task>) {
+    Object.assign(job.task, patch);
+    this.emitTask(job);
   }
 
-  private emitTask(t: Tracked) {
-    this.emit('task', t.task);
+  private emitTask(job: Tracked) {
+    this.emit('task', job.task);
     this.scheduleSave();
   }
 
   /** Fallback for missed websocket events: ask /history about quiet active tasks. */
   private async poll(force = false) {
     const now = Date.now();
-    for (const t of this.tracked.values()) {
-      if (!ACTIVE.has(t.task.status) || !t.task.promptId || t.finalizing) continue;
-      if (!force && now - t.lastEventAt < 8000) continue;
-      t.lastEventAt = now;
+    for (const job of this.tracked.values()) {
+      if (!ACTIVE.has(job.task.status) || !job.task.promptId || job.finalizing) continue;
+      if (!force && now - job.lastEventAt < 8000) continue;
+      job.lastEventAt = now;
       try {
-        const entry = await this.comfy.history(t.task.promptId);
+        const entry = await this.comfy.history(job.task.promptId);
         if (entry?.status?.completed || entry?.status?.status_str === 'error') {
-          await this.finalize(t);
+          await this.finalize(job);
           continue;
         }
         if (!entry) {
           const q = await this.comfy.queue();
-          const running = q.queue_running.some((item) => item[1] === t.task.promptId);
-          const known = running || q.queue_pending.some((item) => item[1] === t.task.promptId);
-          if (known) t.unconfirmedSince = undefined;
-          if (!known && t.unconfirmedSince && now - t.unconfirmedSince < UNCONFIRMED_GRACE) continue;
-          if (!known) this.finish(t, { status: 'error', error: 'ComfyUI 中找不到这个任务（可能已被清空或重启）', stage: '失败' });
+          const running = q.queue_running.some((item) => item[1] === job.task.promptId);
+          const known = running || q.queue_pending.some((item) => item[1] === job.task.promptId);
+          if (known) job.unconfirmedSince = undefined;
+          if (!known && job.unconfirmedSince && now - job.unconfirmedSince < UNCONFIRMED_GRACE) continue;
+          if (!known) this.finish(job, { status: 'error', error: t('ComfyUI 中找不到这个任务（可能已被清空或重启）'), stage: t('失败') });
           // No events reach us for prompts queued under another client id; at least show it is running.
-          else if (running && t.task.status === 'queued') this.update(t, { status: 'running', stage: '运行中', queuePosition: undefined, startedAt: Date.now() });
+          else if (running && job.task.status === 'queued') this.update(job, { status: 'running', stage: t('运行中'), queuePosition: undefined, startedAt: Date.now() });
         }
       } catch {
         /* ComfyUI offline; try again later */
@@ -407,18 +409,18 @@ export class TaskManager extends EventEmitter {
   }
 
   private async refreshQueue() {
-    const queued = [...this.tracked.values()].filter((t) => t.task.status === 'queued');
+    const queued = [...this.tracked.values()].filter((job) => job.task.status === 'queued');
     if (!queued.length) return;
     try {
       const q = await this.comfy.queue();
       const pending = [...q.queue_pending].sort((a, b) => Number(a[0]) - Number(b[0])).map((i) => i[1]);
       const running = q.queue_running.map((i) => i[1]);
-      for (const t of queued) {
-        const idx = pending.indexOf(t.task.promptId);
-        if (running.includes(t.task.promptId)) continue;
+      for (const job of queued) {
+        const idx = pending.indexOf(job.task.promptId);
+        if (running.includes(job.task.promptId)) continue;
         if (idx >= 0) {
           const ahead = idx + running.length;
-          if (ahead !== t.task.queuePosition) this.update(t, { queuePosition: ahead, stage: ahead ? `排队中 · 前面 ${ahead} 个` : '即将开始' });
+          if (ahead !== job.task.queuePosition) this.update(job, { queuePosition: ahead, stage: ahead ? t('排队中 · 前面 {ahead} 个', { ahead }) : t('即将开始') });
         }
       }
     } catch {
@@ -429,11 +431,11 @@ export class TaskManager extends EventEmitter {
   private prune() {
     if (this.tracked.size <= MAX_KEPT) return;
     const old = [...this.tracked.values()]
-      .filter((t) => !ACTIVE.has(t.task.status))
+      .filter((job) => !ACTIVE.has(job.task.status))
       .sort((a, b) => a.task.createdAt - b.task.createdAt);
-    for (const t of old.slice(0, this.tracked.size - MAX_KEPT)) {
-      this.tracked.delete(t.task.id);
-      if (t.task.promptId) this.byPrompt.delete(t.task.promptId);
+    for (const job of old.slice(0, this.tracked.size - MAX_KEPT)) {
+      this.tracked.delete(job.task.id);
+      if (job.task.promptId) this.byPrompt.delete(job.task.promptId);
     }
   }
 
@@ -444,7 +446,7 @@ export class TaskManager extends EventEmitter {
 
   async flush() {
     clearTimeout(this.saveTimer);
-    const data = [...this.tracked.values()].map((t) => ({ ...t.task, stages: t.stages, outputNodes: t.outputNodes }));
+    const data = [...this.tracked.values()].map((job) => ({ ...job.task, stages: job.stages, outputNodes: job.outputNodes }));
     const tmp = this.file + '.tmp';
     await writeFile(tmp, JSON.stringify(data));
     await rename(tmp, this.file);

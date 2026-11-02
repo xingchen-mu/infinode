@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CustomWorkflow, ModelDownload } from '../shared/types.ts';
+import { msg } from '../shared/i18n.ts';
 
 export interface Preset extends CustomWorkflow {
   preset: true;
@@ -39,7 +40,7 @@ export class PresetStore {
           updatedAt: 0,
           preset: true,
           template: p.template,
-          category: p.category ?? '其它',
+          category: p.category ?? msg('其它'),
           usage: p.usage ?? 0,
           thumb: p.thumb ?? `${p.template}-1.webp`,
           models: p.models ?? [],

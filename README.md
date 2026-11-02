@@ -40,6 +40,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - **画布助手**：右上角「助手」打开对话面板，用一句话让它读画布、看图、出图、出视频、运行你的工作流，结果照样连线；还能从一句话做到一条多镜头短剧（剧本 → 分镜 → 设定图 → 关键帧 → 视频 → 剪辑成片）。模型可用 DeepSeek 等，也可接任意 OpenAI 兼容接口
 - **接入 Claude Code / Codex**：内置 MCP 服务，外部 agent 能用和画布助手同一套工具操作画布，你在页面上实时看到结果
 - **文本节点**：剧本、分镜表、备注直接放在画布上，双击编辑
+- **中英文界面**：默认跟随浏览器语言，可在设置里切换；服务端的提示和画布助手的回复也跟着变
 
 <table>
 <tr>
@@ -267,6 +268,7 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 - Drag a line out of an image to place the next generation exactly where you want it
 - Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`). It can take a short drama from a one-line idea to a cut: script and shot list as text notes, character and scene sheets, keyframes, one video per shot (after you approve the GPU time), then an edit (needs ffmpeg)
 - Text notes on the board for scripts, shot lists and comments
+- English and Chinese interface: follows your browser's language, switchable in Settings; server messages and the assistant's replies follow it
 - A commercial-only switch in Settings turns off research-only and non-commercial models; every built-in tool and template is labeled with its license
 - Built-in MCP server at `http://127.0.0.1:8787/mcp` (this machine only): Claude Code (`claude mcp add --transport http infinode http://127.0.0.1:8787/mcp`), Codex (`codex mcp add infinode --url http://127.0.0.1:8787/mcp`) and other agents get the same canvas tools as the assistant, and know which board and items you have selected in the page
 

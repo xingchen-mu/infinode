@@ -5,6 +5,7 @@ import { outpaint } from '../lib/actions';
 import { type Rect, toScreen, toWorld } from '../lib/geometry';
 import { aspectValue } from '../lib/models';
 import { useStore } from '../store';
+import { t } from '../i18n';
 
 interface OutpaintState {
   frame: Rect | null;
@@ -131,8 +132,8 @@ export function OutpaintPanel() {
   return (
     <div className="panel edit-panel" data-ui>
       <div className="edit-head">
-        <div className="edit-title">扩图</div>
-        <div className="edit-hint">拖动虚线框的边或角设置扩展范围，也可以选一个比例</div>
+        <div className="edit-title">{t('扩图')}</div>
+        <div className="edit-hint">{t('拖动虚线框的边或角设置扩展范围，也可以选一个比例')}</div>
       </div>
       <div className="edit-tools">
         <div className="chips">
@@ -142,7 +143,7 @@ export function OutpaintPanel() {
               className={`chip ${preset === p ? 'on' : ''}`}
               onClick={() => item && useOutpaint.setState({ frame: presetFrame(item, p), preset: p })}
             >
-              {p === '1.5x' ? '等比 1.5 倍' : p === '2x' ? '等比 2 倍' : p}
+              {p === '1.5x' ? t('等比 1.5 倍') : p === '2x' ? t('等比 2 倍') : p}
             </button>
           ))}
         </div>
@@ -150,7 +151,7 @@ export function OutpaintPanel() {
       <textarea
         className="edit-prompt"
         rows={2}
-        placeholder="描述扩展区域的内容（可选），例如：远处是海边的落日"
+        placeholder={t('描述扩展区域的内容（可选），例如：远处是海边的落日')}
         value={prompt}
         onChange={(e) => useOutpaint.setState({ prompt: e.target.value })}
         onKeyDown={(e) => {
@@ -162,10 +163,10 @@ export function OutpaintPanel() {
       />
       <div className="edit-actions">
         <button className="btn ghost" onClick={close}>
-          取消
+          {t('取消')}
         </button>
         <button className="btn primary" onClick={submit} disabled={!grown}>
-          扩图
+          {t('扩图')}
         </button>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import type { Lang } from './i18n.ts';
 // Types shared by the browser app and the backend.
 
 export type MediaKind = 'image' | 'video';
@@ -230,6 +231,8 @@ export interface Settings {
   comfyUrl: string;
   /** Only models whose license allows commercial use (see shared/licenses.ts); the rest are switched off. */
   commercialOnly?: boolean;
+  /** Interface language of the page that last opened Infinode: the server's messages and the assistant follow it. */
+  language?: Lang;
 }
 
 /** Text items hold notes such as a script or a shot list. */

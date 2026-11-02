@@ -3,13 +3,14 @@ import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { CanvasItem, Project, ProjectSummary } from '../shared/types.ts';
 import { config } from './config.ts';
+import { t } from './i18n.ts';
 
 const ID = /^[\w-]{6,32}$/;
 
 /** The board changed since the version the writer started from. */
 export class ProjectConflict extends Error {
   constructor(readonly project: Project) {
-    super('画布已在别处被修改');
+    super(t('画布已在别处被修改'));
   }
 }
 
@@ -66,7 +67,7 @@ export class ProjectStore {
     }
   }
 
-  async create(name = '未命名画布'): Promise<Project> {
+  async create(name = t('未命名画布')): Promise<Project> {
     const now = Date.now();
     const p: Project = { id: nanoid(10), name, items: [], viewport: { x: 0, y: 0, zoom: 1 }, createdAt: now, updatedAt: now };
     await this.write(p);

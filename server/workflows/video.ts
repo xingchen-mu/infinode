@@ -1,5 +1,6 @@
 import { Graph, type BuiltWorkflow, type InputFile } from './graph.ts';
 import { model as modelFile } from './models.ts';
+import { t } from '../i18n.ts';
 
 const PREFIX = 'infinode/';
 
@@ -74,9 +75,9 @@ export function minimaxGenerate(p: {
     outputNodes: [save.id],
     expected: { kind: 'video', width: p.width, height: p.height },
     stages: [
-      { node: cond.id, label: '理解提示词与画面', weight: 0.3 },
-      { node: s.id, label: '生成中', weight: 0.55 },
-      { node: dec.id, label: '解码中', weight: 0.15 },
+      { node: cond.id, label: t('理解提示词与画面'), weight: 0.3 },
+      { node: s.id, label: t('生成中'), weight: 0.55 },
+      { node: dec.id, label: t('解码中'), weight: 0.15 },
     ],
   };
 }
@@ -110,9 +111,9 @@ export function minimaxReference(p: {
     outputNodes: [save.id],
     expected: { kind: 'video', width: p.width, height: p.height },
     stages: [
-      { node: cond.id, label: '理解参考图', weight: 0.3 },
-      { node: s.id, label: '生成中', weight: 0.55 },
-      { node: dec.id, label: '解码中', weight: 0.15 },
+      { node: cond.id, label: t('理解参考图'), weight: 0.3 },
+      { node: s.id, label: t('生成中'), weight: 0.55 },
+      { node: dec.id, label: t('解码中'), weight: 0.15 },
     ],
   };
 }

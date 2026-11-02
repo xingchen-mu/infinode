@@ -4,33 +4,34 @@ import type { TaskRequest } from '../../shared/types';
 import { download } from '../lib/actions';
 import { IMAGE_MODELS, VIDEO_MODELS } from '../lib/models';
 import { useStore } from '../store';
+import { t } from '../i18n';
 
 function describe(r: TaskRequest): [string, string][] {
   const rows: [string, string][] = [];
   switch (r.op) {
     case 'image.generate':
-      rows.push(['操作', r.images?.length ? '参考图生成' : '文生图'], ['模型', IMAGE_MODELS.find((m) => m.id === r.model)?.name ?? r.model]);
+      rows.push([t('操作'), r.images?.length ? t('参考图生成') : t('文生图')], [t('模型'), IMAGE_MODELS.find((m) => m.id === r.model)?.name ?? r.model]);
       break;
     case 'video.generate':
-      rows.push(['操作', '生成视频'], ['模型', VIDEO_MODELS.find((m) => m.id === r.model)?.name ?? r.model], ['时长', `${r.duration} 秒`]);
+      rows.push([t('操作'), t('生成视频')], [t('模型'), VIDEO_MODELS.find((m) => m.id === r.model)?.name ?? r.model], [t('时长'), t('{n} 秒', { n: r.duration })]);
       break;
     case 'image.inpaint':
-      rows.push(['操作', '局部重绘']);
+      rows.push([t('操作'), t('局部重绘')]);
       break;
     case 'image.erase':
-      rows.push(['操作', '消除']);
+      rows.push([t('操作'), t('消除')]);
       break;
     case 'image.outpaint':
-      rows.push(['操作', '扩图']);
+      rows.push([t('操作'), t('扩图')]);
       break;
     case 'image.removeBg':
-      rows.push(['操作', '抠图']);
+      rows.push([t('操作'), t('抠图')]);
       break;
     case 'image.upscale':
-      rows.push(['操作', `${r.scale} 倍超清`]);
+      rows.push([t('操作'), t('{scale} 倍超清', { scale: r.scale })]);
       break;
     case 'custom':
-      rows.push(['工作流', [...useStore.getState().workflows, ...useStore.getState().presets].find((w) => w.id === r.workflow)?.name ?? '已删除的工作流']);
+      rows.push([t('工作流'), t([...useStore.getState().workflows, ...useStore.getState().presets].find((w) => w.id === r.workflow)?.name ?? '已删除的工作流')]);
       break;
   }
   return rows;
@@ -69,8 +70,8 @@ export function Lightbox() {
       </div>
       <div className="lb-side">
         <div className="lb-head">
-          <span>详情</span>
-          <button className="icon-btn" onClick={close} title="关闭 (Esc)">
+          <span>{t('详情')}</span>
+          <button className="icon-btn" onClick={close} title={t('关闭 (Esc)')}>
             <X />
           </button>
         </div>
@@ -83,20 +84,20 @@ export function Lightbox() {
             </div>
           ))}
           <div className="lb-row">
-            <span>尺寸</span>
+            <span>{t('尺寸')}</span>
             <span>
               {item.asset.width} × {item.asset.height}
             </span>
           </div>
           {seed !== undefined && (
             <div className="lb-row">
-              <span>种子</span>
+              <span>{t('种子')}</span>
               <span>{seed}</span>
             </div>
           )}
         </div>
         <button className="btn primary wide" onClick={() => download(item)}>
-          <Download /> 下载原图
+          <Download /> {t('下载原图')}
         </button>
       </div>
     </div>

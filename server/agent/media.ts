@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import sharp from 'sharp';
+import { t } from '../i18n.ts';
 
 /** Runs a command; resolves with stdout (or stderr, where ffmpeg filters report), rejects with the tail of stderr. */
 function exec(cmd: string, args: string[], signal?: AbortSignal, want: 'stdout' | 'stderr' = 'stdout'): Promise<Buffer> {
@@ -12,8 +13,8 @@ function exec(cmd: string, args: string[], signal?: AbortSignal, want: 'stdout' 
       if (want === 'stderr') out.push(d);
       err = (err + d.toString()).slice(-4000);
     });
-    p.on('error', (e) => reject((e as NodeJS.ErrnoException).code === 'ENOENT' ? new Error(`找不到 ${cmd}：剪辑和看视频需要安装 ffmpeg（macOS：brew install ffmpeg）`) : e));
-    p.on('close', (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`${cmd} 出错：${err.trim().split('\n').slice(-3).join(' ')}`))));
+    p.on('error', (e) => reject((e as NodeJS.ErrnoException).code === 'ENOENT' ? new Error(t('找不到 {cmd}：剪辑和看视频需要安装 ffmpeg（macOS：brew install ffmpeg）', { cmd })) : e));
+    p.on('close', (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(t('{cmd} 出错：{detail}', { cmd, detail: err.trim().split('\n').slice(-3).join(' ') })))));
   });
 }
 
@@ -131,7 +132,7 @@ export async function concatClips(clips: Clip[], out: string, signal?: AbortSign
     const info = infos[i];
     const start = Math.max(0, Math.min(c.start ?? 0, info.duration));
     const end = Math.min(info.duration, c.end ?? info.duration);
-    if (end - start < 0.1) throw new Error(`第 ${i + 1} 段裁剪后没有内容（${start}–${end} 秒，片长 ${info.duration.toFixed(2)} 秒）`);
+    if (end - start < 0.1) throw new Error(t('第 {n} 段裁剪后没有内容（{start}–{end} 秒，片长 {duration} 秒）', { n: i + 1, start, end, duration: info.duration.toFixed(2) }));
     total += end - start;
     const v = input++;
     args.push('-i', c.path);

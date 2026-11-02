@@ -18,6 +18,8 @@ import type {
 } from '../../shared/types.ts';
 import { type BuiltWorkflow, type InputFile, type Stage, parseAspect, sizeForAspect } from './graph.ts';
 import { comboOptions } from './models.ts';
+import { msg } from '../../shared/i18n.ts';
+import { list, t } from '../i18n.ts';
 
 export class WorkflowFormatError extends Error {}
 
@@ -68,7 +70,7 @@ function customTitle(node: ComfyApiNode, info?: ObjectInfo): string | undefined 
 
 /** Accepts our share format or a ComfyUI API export; explains how to fix a UI-format file. */
 export function parseWorkflowJson(json: unknown): { graph: ComfyApiGraph; saved?: Partial<CustomWorkflow> } {
-  if (!json || typeof json !== 'object') throw new WorkflowFormatError('不是有效的 JSON 文件');
+  if (!json || typeof json !== 'object') throw new WorkflowFormatError(t('不是有效的 JSON 文件'));
   const obj = json as Record<string, unknown>;
   // comfy-canva/workflow: files exported before the project was renamed.
   if ((obj.format === 'infinode/workflow' || obj.format === 'comfy-canva/workflow') && obj.graph && typeof obj.graph === 'object') {
@@ -77,7 +79,7 @@ export function parseWorkflowJson(json: unknown): { graph: ComfyApiGraph; saved?
   }
   if (Array.isArray(obj.nodes) && Array.isArray(obj.links)) {
     throw new WorkflowFormatError(
-      '这是 ComfyUI 的普通工作流文件。请在 ComfyUI 里打开它，然后用菜单「工作流 → 导出 (API)」(Workflow → Export (API)) 导出，再导入导出的文件。',
+      t('这是 ComfyUI 的普通工作流文件。请在 ComfyUI 里打开它，然后用菜单「工作流 → 导出 (API)」(Workflow → Export (API)) 导出，再导入导出的文件。'),
     );
   }
   const source = (obj.prompt && typeof obj.prompt === 'object' ? obj.prompt : obj) as Record<string, unknown>;
@@ -89,7 +91,7 @@ export function parseWorkflowJson(json: unknown): { graph: ComfyApiGraph; saved?
     graph[id] = { ...node, inputs: node.inputs && typeof node.inputs === 'object' ? node.inputs : {} };
   }
   if (!Object.keys(graph).length) {
-    throw new WorkflowFormatError('没有找到 ComfyUI 节点。请导入 ComfyUI「导出 (API)」得到的 JSON 文件。');
+    throw new WorkflowFormatError(t('没有找到 ComfyUI 节点。请导入 ComfyUI「导出 (API)」得到的 JSON 文件。'));
   }
   return { graph };
 }
@@ -134,7 +136,7 @@ export function graphIssues(source: ComfyApiGraph, info: ObjectInfo): WorkflowIs
     node: c.node,
     field: c.field,
     value: c.from,
-    message: `${c.from} → 自动改用服务器上的 ${c.to}`,
+    message: t('{from} → 自动改用服务器上的 {to}', { from: c.from, to: c.to }),
   }));
   const seenNodes = new Set<string>();
   for (const id of Object.keys(graph).sort(byNumericId)) {
@@ -143,7 +145,7 @@ export function graphIssues(source: ComfyApiGraph, info: ObjectInfo): WorkflowIs
     if (!def) {
       if (!seenNodes.has(node.class_type)) {
         seenNodes.add(node.class_type);
-        issues.push({ type: 'node', node: id, value: node.class_type, message: `缺少节点 ${node.class_type}（需要在 ComfyUI 里安装对应的自定义节点）` });
+        issues.push({ type: 'node', node: id, value: node.class_type, message: t('缺少节点 {node}（需要在 ComfyUI 里安装对应的自定义节点）', { node: node.class_type }) });
       }
       continue;
     }
@@ -152,7 +154,7 @@ export function graphIssues(source: ComfyApiGraph, info: ObjectInfo): WorkflowIs
       if (field === loaderField || typeof value !== 'string') continue;
       const opts = comboOptions(def.input.required?.[field] ?? def.input.optional?.[field]);
       if (opts && opts.length && !opts.includes(value)) {
-        issues.push({ type: 'file', node: id, field, value, options: opts, message: `缺少文件 ${value}（#${id} ${node.class_type}.${field}）` });
+        issues.push({ type: 'file', node: id, field, value, options: opts, message: t('缺少文件 {value}（#{id} {node}.{field}）', { value, id, node: node.class_type, field }) });
       }
     }
   }
@@ -163,7 +165,7 @@ export function graphIssues(source: ComfyApiGraph, info: ObjectInfo): WorkflowIs
 export function validateGraph(graph: ComfyApiGraph, info: ObjectInfo): string[] {
   return graphIssues(graph, info)
     .filter((i) => i.type !== 'auto')
-    .map((i) => (i.type === 'file' ? `模型 ${i.value}` : `节点 ${i.value}`));
+    .map((i) => (i.type === 'file' ? t('模型 {name}', { name: i.value ?? '' }) : t('节点 {name}', { name: i.value ?? '' })));
 }
 
 /** Which way a text field feeds: into a "negative" input, a positive one, or neither. */
@@ -244,13 +246,13 @@ export function detectWorkflow(graph: ComfyApiGraph, info?: ObjectInfo): Omit<Wo
   const prompt = pickText('positive', 'prompt');
   if (prompt) {
     sameText(prompt).forEach((s, i) =>
-      inputs.push({ id: i ? `prompt${i + 1}` : 'prompt', type: 'prompt', node: s.node, field: s.field, label: '提示词', default: prompt.value }),
+      inputs.push({ id: i ? `prompt${i + 1}` : 'prompt', type: 'prompt', node: s.node, field: s.field, label: msg('提示词'), default: prompt.value }),
     );
   }
   const negative = pickText('negative', 'negative');
   if (negative && negative !== prompt) {
     sameText(negative).forEach((s, i) =>
-      inputs.push({ id: i ? `negative${i + 1}` : 'negative', type: 'negative', node: s.node, field: s.field, label: '反向提示词', default: negative.value }),
+      inputs.push({ id: i ? `negative${i + 1}` : 'negative', type: 'negative', node: s.node, field: s.field, label: msg('反向提示词'), default: negative.value }),
     );
   }
 
@@ -264,7 +266,7 @@ export function detectWorkflow(graph: ComfyApiGraph, info?: ObjectInfo): Omit<Wo
     if (tag && tag.role !== loader.type) continue;
     if (!tag && tagged(loader.type).length) continue;
     const n = ++counts[loader.type];
-    const base = loader.type === 'image' ? '图' : loader.type === 'video' ? '视频' : '蒙版';
+    const base = loader.type === 'image' ? msg('图') : loader.type === 'video' ? msg('视频') : msg('蒙版');
     inputs.push({
       id: `${loader.type}${n}`,
       type: loader.type,
@@ -279,7 +281,7 @@ export function detectWorkflow(graph: ComfyApiGraph, info?: ObjectInfo): Omit<Wo
   for (const id of ids) {
     for (const [field, value] of Object.entries(graph[id].inputs)) {
       if (/^(seed|noise_seed)$/.test(field) && typeof value === 'number') {
-        inputs.push({ id: `seed${++seeds}`, type: 'seed', node: id, field, label: '种子' });
+        inputs.push({ id: `seed${++seeds}`, type: 'seed', node: id, field, label: msg('种子') });
       }
     }
   }
@@ -291,7 +293,7 @@ export function detectWorkflow(graph: ComfyApiGraph, info?: ObjectInfo): Omit<Wo
       if (typeof value !== 'string' || !/aspect/i.test(field)) continue;
       const opts = comboOptions(info?.[node.class_type]?.input.required?.[field] ?? info?.[node.class_type]?.input.optional?.[field]);
       if (opts?.some((o) => /^\d+(\.\d+)?:\d+/.test(o)) && !inputs.some((i) => i.type === 'aspect')) {
-        inputs.push({ id: 'aspect', type: 'aspect', node: id, field, label: '画面比例', default: value, options: opts });
+        inputs.push({ id: 'aspect', type: 'aspect', node: id, field, label: msg('画面比例'), default: value, options: opts });
       }
     }
   }
@@ -314,8 +316,8 @@ export function detectWorkflow(graph: ComfyApiGraph, info?: ObjectInfo): Omit<Wo
     tagged('size').find((id) => typeof graph[id].inputs.width === 'number') ??
     ids.find((id) => /Empty.*Latent|^EmptyImage$/.test(graph[id].class_type) && typeof graph[id].inputs.width === 'number' && typeof graph[id].inputs.height === 'number');
   if (sizeNode) {
-    inputs.push({ id: 'width', type: 'width', node: sizeNode, field: 'width', label: '宽', default: graph[sizeNode].inputs.width as number });
-    inputs.push({ id: 'height', type: 'height', node: sizeNode, field: 'height', label: '高', default: graph[sizeNode].inputs.height as number });
+    inputs.push({ id: 'width', type: 'width', node: sizeNode, field: 'width', label: msg('宽'), default: graph[sizeNode].inputs.width as number });
+    inputs.push({ id: 'height', type: 'height', node: sizeNode, field: 'height', label: msg('高'), default: graph[sizeNode].inputs.height as number });
   }
 
   const outputCandidates = ids
@@ -427,14 +429,14 @@ export function simplifyGraph(graph: ComfyApiGraph, outputs: string[]): ComfyApi
 
 /** Keeps an edited mapping consistent with its graph. */
 export function checkWorkflow(wf: Pick<CustomWorkflow, 'graph' | 'inputs' | 'outputs' | 'kind' | 'name'>): string | null {
-  if (!wf.name?.trim()) return '请填写名称';
-  if (!wf.outputs.length) return '请至少选择一个输出节点';
-  for (const out of wf.outputs) if (!wf.graph[out]) return `输出节点 #${out} 不存在`;
+  if (!wf.name?.trim()) return t('请填写名称');
+  if (!wf.outputs.length) return t('请至少选择一个输出节点');
+  for (const out of wf.outputs) if (!wf.graph[out]) return t('输出节点 #{out} 不存在', { out });
   const keys = new Set<string>();
   for (const inp of wf.inputs) {
-    if (!wf.graph[inp.node]) return `「${inp.label}」对应的节点 #${inp.node} 不存在`;
-    if (!(inp.field in wf.graph[inp.node].inputs)) return `节点 #${inp.node} 没有字段 ${inp.field}`;
-    if (keys.has(inp.id)) return `重复的输入 id: ${inp.id}`;
+    if (!wf.graph[inp.node]) return t('「{label}」对应的节点 #{node} 不存在', { label: t(inp.label), node: inp.node });
+    if (!(inp.field in wf.graph[inp.node].inputs)) return t('节点 #{node} 没有字段 {field}', { node: inp.node, field: inp.field });
+    if (keys.has(inp.id)) return t('重复的输入 id: {id}', { id: inp.id });
     keys.add(inp.id);
   }
   return null;
@@ -463,27 +465,27 @@ export function buildCustom(wf: CustomWorkflow, req: Extract<TaskRequest, { op: 
   const graph: ComfyApiGraph = structuredClone(wf.graph);
   const set = (inp: WorkflowInput, value: unknown) => {
     const node = graph[inp.node];
-    if (!node) throw new Error(`工作流缺少节点 #${inp.node}`);
+    if (!node) throw new Error(t('工作流缺少节点 #{node}', { node: inp.node }));
     node.inputs[inp.field] = value;
   };
   const of = (type: WorkflowInput['type']) => wf.inputs.filter((i) => i.type === type);
 
-  const need = (type: 'image' | 'video', list: InputFile[]) => {
+  const need = (type: 'image' | 'video', given: InputFile[]) => {
     const slots = of(type);
     const required = slots.filter((s) => !s.optional);
-    if (list.length < required.length) {
-      const what = type === 'image' ? '图片' : '视频';
-      throw new Error(`「${wf.name}」需要 ${required.length} 个${what}输入（${required.map((s) => s.label).join('、')}），请先在画布上选中`);
+    if (given.length < required.length) {
+      const vars = { name: t(wf.name), n: required.length, list: list(required.map((s) => t(s.label))) };
+      throw new Error(type === 'image' ? t('「{name}」需要 {n} 个图片输入（{list}），请先在画布上选中', vars) : t('「{name}」需要 {n} 个视频输入（{list}），请先在画布上选中', vars));
     }
     slots.forEach((s, i) => {
-      if (list[i]) set(s, list[i].comfyName);
+      if (given[i]) set(s, given[i].comfyName);
       else removeNode(graph, s.node); // optional and not given
     });
   };
   need('image', files.images);
   need('video', files.videos);
   for (const m of of('mask')) {
-    if (!files.mask) throw new Error(`「${wf.name}」需要蒙版`);
+    if (!files.mask) throw new Error(t('「{name}」需要蒙版', { name: t(wf.name) }));
     set(m, files.mask.comfyName);
   }
 
@@ -552,7 +554,7 @@ export function buildCustom(wf: CustomWorkflow, req: Extract<TaskRequest, { op: 
   const expectedSize = size ?? (first ? { width: first.width, height: first.height } : wf.kind === 'video' ? { width: 1280, height: 720 } : { width: 1024, height: 1024 });
   const stages: Stage[] = Object.keys(graph)
     .filter((id) => HEAVY.test(graph[id].class_type))
-    .map((id) => ({ node: id, label: '生成中', weight: 1 }));
+    .map((id) => ({ node: id, label: t('生成中'), weight: 1 }));
 
   return {
     graph,

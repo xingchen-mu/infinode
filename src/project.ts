@@ -3,6 +3,8 @@ import { fitAll } from './lib/actions';
 import { ConflictError, api, clientId, type ProjectEvent } from './lib/api';
 import { mergeItems } from './lib/merge';
 import { applyTask, resolveItems, toast, useStore } from './store';
+import { msg } from '../shared/i18n';
+import { t } from './i18n';
 
 const LAST_KEY = 'infinode:last-project';
 
@@ -123,7 +125,7 @@ export function refreshProject() {
 export function onProjectEvent(e: ProjectEvent) {
   if (e.id !== useStore.getState().projectId || e.by === clientId) return;
   if (e.deleted) {
-    toast('这个画布已在别处被删除', 'error');
+    toast(t('这个画布已在别处被删除'), 'error');
     return;
   }
   void serial(async () => {
@@ -152,7 +154,7 @@ export async function syncTasks() {
     const lost = ids.filter((id) => !known.has(id) && !recent.has(id));
     if (lost.length) {
       useStore.setState({
-        items: useStore.getState().items.map((i) => (i.taskId && lost.includes(i.taskId) ? { ...i, error: '任务记录丢失，请重试' } : i)),
+        items: useStore.getState().items.map((i) => (i.taskId && lost.includes(i.taskId) ? { ...i, error: msg('任务记录丢失，请重试') } : i)),
       });
     }
   } catch {
@@ -172,7 +174,7 @@ export async function openProject(id: string) {
       projectName: p.name,
       // Placeholders that never got a task (closed mid-submit in an older version) become retryable errors.
       items: resolveItems(
-        p.items.map((i) => (i.kind !== 'text' && !i.asset && !i.taskId && !i.error ? { ...i, error: '提交未完成，请重试' } : i)),
+        p.items.map((i) => (i.kind !== 'text' && !i.asset && !i.taskId && !i.error ? { ...i, error: msg('提交未完成，请重试') } : i)),
         tasks,
       ),
       viewport: fresh ? { x: screen.w / 2, y: (screen.h - 160) / 2, zoom: 1 } : p.viewport,

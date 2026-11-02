@@ -1,4 +1,5 @@
 import type { ApiNode } from './workflows/graph.ts';
+import { t } from './i18n.ts';
 
 export interface ComfyFileRef {
   filename: string;
@@ -74,7 +75,7 @@ export class ComfyClient {
     try {
       res = await fetch(this.url(path), { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch (err) {
-      throw new ComfyError(`无法连接 ComfyUI (${this.baseUrl}): ${(err as Error).message}`);
+      throw new ComfyError(t('无法连接 ComfyUI ({baseUrl}): {message}', { baseUrl: this.baseUrl, message: (err as Error).message }));
     }
     if (!res.ok) throw new ComfyError(describePromptError(await res.text()), res.status);
     return res;
@@ -219,13 +220,16 @@ export function historyFiles(entry: HistoryEntry, nodeIds?: string[]): ComfyFile
   return files;
 }
 
+/** What historyError returns for a run that was interrupted (cancelled) rather than failed. */
+export const INTERRUPTED = 'interrupted';
+
 export function historyError(entry: HistoryEntry): string | undefined {
   for (const [type, data] of entry.status?.messages ?? []) {
     if (type === 'execution_error') {
       const d = data as { node_type?: string; exception_message?: string };
-      return `${d.node_type ?? ''}: ${(d.exception_message ?? '执行失败').trim()}`;
+      return `${d.node_type ?? ''}: ${(d.exception_message ?? t('执行失败')).trim()}`;
     }
-    if (type === 'execution_interrupted') return '已中断';
+    if (type === 'execution_interrupted') return INTERRUPTED;
   }
-  return entry.status?.status_str === 'error' ? '执行失败' : undefined;
+  return entry.status?.status_str === 'error' ? t('执行失败') : undefined;
 }

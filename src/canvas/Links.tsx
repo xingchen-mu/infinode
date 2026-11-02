@@ -3,6 +3,7 @@ import { IMAGE_LONG_SIDE, VIDEO_LONG_SIDE, inputIds } from '../lib/actions';
 import { type Rect, displaySize } from '../lib/geometry';
 import { aspectValue } from '../lib/models';
 import { useStore } from '../store';
+import { t } from '../i18n';
 
 interface Pt {
   x: number;
@@ -47,28 +48,28 @@ export function linkPath(a: Rect, b: Rect) {
 /** What an input was used for, shown on its link. */
 function linkLabel(out: CanvasItem, input: CanvasItem, index: number, total: number): string {
   const r = out.request;
-  if (!r) return input.kind === 'video' ? '截帧' : '';
+  if (!r) return input.kind === 'video' ? t('截帧') : '';
   switch (r.op) {
     case 'image.generate':
-      return total > 1 ? `图${index + 1}` : '参考';
+      return total > 1 ? t('图{n}', { n: index + 1 }) : t('参考');
     case 'video.generate':
-      if (r.model === 'minimax-ref') return `参考${index + 1}`;
-      return index === 0 ? '首帧' : '尾帧';
+      if (r.model === 'minimax-ref') return t('参考{n}', { n: index + 1 });
+      return index === 0 ? t('首帧') : t('尾帧');
     case 'image.inpaint':
-      return '局部重绘';
+      return t('局部重绘');
     case 'image.erase':
-      return '消除';
+      return t('消除');
     case 'image.outpaint':
-      return '扩图';
+      return t('扩图');
     case 'image.removeBg':
-      return '抠图';
+      return t('抠图');
     case 'image.upscale':
-      return `超清 ${r.scale}×`;
+      return t('超清 {scale}×', { scale: r.scale });
     case 'custom': {
       const { workflows, presets } = useStore.getState();
       const wf = workflows.find((w) => w.id === r.workflow) ?? presets.find((p) => p.id === r.workflow);
       const slots = wf?.inputs.filter((i) => i.type === 'image' || i.type === 'video') ?? [];
-      return slots[index]?.label ?? wf?.name ?? '工作流';
+      return t(slots[index]?.label ?? wf?.name ?? '工作流');
     }
   }
 }
@@ -180,10 +181,10 @@ export function Links({
       {slot && layer === 'above' && (
         <div className="slot" style={{ transform: `translate(${slot.x}px, ${slot.y}px)`, width: slot.w, height: slot.h }}>
           <div className="slot-text">
-            在下方输入提示词
+            {t('在下方输入提示词')}
             <br />
-            结果会生成在这里
-            <small>Esc 取消</small>
+            {t('结果会生成在这里')}
+            <small>{t('Esc 取消')}</small>
           </div>
         </div>
       )}

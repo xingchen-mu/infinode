@@ -28,13 +28,18 @@ server/              后端（Hono）
   workflows/         内置工具的 ComfyUI 工作流、导入工作流的识别与运行
   tasks.ts           任务队列、进度跟踪（ComfyUI WebSocket）、结果下载
 shared/types.ts      前后端共享的类型
+shared/locales/en.ts 英文界面的词典
 presets/             官方模板转换来的预设（由脚本生成，不要手改）
 scripts/             建 SSH 隧道、测试工作流、生成预设
 ```
 
+## 界面文字和翻译
+
+界面上的文字直接写中文，用 `t()` 包起来：前端从 `src/i18n.ts` 引入，后端从 `server/i18n.ts` 引入，例如 `t('{n} 个节点', { n })`。然后在 `shared/locales/en.ts` 里加上英文，以中文原文为键；数量用 `{n}` 并写成 `['单数', '复数']`。只在定义处标记、到显示时才翻译的文字（比如存进数据里的标签）用 `msg()`。`npm test` 会检查界面里有没有漏掉的中文、词典里有没有缺的或多余的词条。画布助手的提示词和工具说明是写给模型看的，保持中文，不用翻译。
+
 ## 新增官方模板预设
 
-1. 在 `scripts/preset-sources.ts` 里加一项：模板名、中文名称、分类，需要的话设置开关值和要暴露的参数
+1. 在 `scripts/preset-sources.ts` 里加一项：模板名、中文名称、分类，需要的话设置开关值和要暴露的参数；名称和说明的英文加进 `shared/locales/en.ts`
 2. 确保本机能连上一个装了官方模板包的 ComfyUI，并安装了 Google Chrome
 3. 运行 `npm run build:presets -- <预设 id>`，检查 `presets/<id>.json` 的输入映射是否合理
 4. 最好在真实的 ComfyUI 上跑一次
@@ -53,4 +58,4 @@ npm run test:wf -- '{"op":"image.generate","model":"zimage","prompt":"a cat","as
 
 ---
 
-**English summary:** Issues and PRs are welcome. Run `npm run typecheck` and `npm test` before submitting; CI runs typecheck, build, the unit tests (including the canvas assistant on pi's faux model) and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit and agree that it is released under the MIT License.
+**English summary:** Issues and PRs are welcome. Interface text is written in Chinese inside `t()` with its English in `shared/locales/en.ts` (keyed by the Chinese); `npm test` fails on untranslated text. Run `npm run typecheck` and `npm test` before submitting; CI runs typecheck, build, the unit tests (including the canvas assistant on pi's faux model) and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit and agree that it is released under the MIT License.

@@ -1,4 +1,5 @@
 import type { Task, TaskRequest } from '../../shared/types.ts';
+import { t } from '../i18n.ts';
 
 /** GPU seconds per second of MiniMax H3 video, and the extra for loading it, measured on the reference GPU. */
 const H3_DEFAULT = { '480p': { perSecond: 30, warmup: 600 }, '720p': { perSecond: 66, warmup: 600 } } as const;
@@ -50,7 +51,7 @@ export function imageEstimate(history: Task[], request: TaskRequest): number {
   return runs.length ? Math.round(median(runs.slice(-20).map(took))) : IMAGE_DEFAULT;
 }
 
-/** "约 12 分钟" / "约 40 秒". */
+/** "约 12 分钟" / "约 40 秒" (in the server's language). */
 export function roughly(seconds: number): string {
-  return seconds >= 90 ? `约 ${Math.round(seconds / 60)} 分钟` : `约 ${Math.max(5, Math.round(seconds / 5) * 5)} 秒`;
+  return seconds >= 90 ? t('约 {n} 分钟', { n: Math.round(seconds / 60) }) : t('约 {n} 秒', { n: Math.max(5, Math.round(seconds / 5) * 5) });
 }

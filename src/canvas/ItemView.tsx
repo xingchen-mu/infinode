@@ -6,6 +6,7 @@ import { cancel, retry } from '../lib/actions';
 import { api } from '../lib/api';
 import { patchItem, removeItems, updateItems, useStore } from '../store';
 import { Markdown } from '../ui/Markdown';
+import { t } from '../i18n';
 
 function Elapsed({ since }: { since: number }) {
   const [, tick] = useState(0);
@@ -14,7 +15,7 @@ function Elapsed({ since }: { since: number }) {
     return () => clearInterval(t);
   }, []);
   const s = Math.max(0, Math.round((Date.now() - since) / 1000));
-  return <span className="ph-elapsed">{s >= 60 ? `${Math.floor(s / 60)}分${s % 60}秒` : `${s}秒`}</span>;
+  return <span className="ph-elapsed">{s >= 60 ? t('{m}分{s}秒', { m: Math.floor(s / 60), s: s % 60 }) : t('{s}秒', { s })}</span>;
 }
 
 function Placeholder({ item, task }: { item: CanvasItem; task?: Task }) {
@@ -24,17 +25,17 @@ function Placeholder({ item, task }: { item: CanvasItem; task?: Task }) {
       <div className="ph ph-error">
         <div className="ph-inner">
           <AlertTriangle className="ph-icon" />
-          <div className="ph-text" title={item.error}>
-            {item.error}
+          <div className="ph-text" title={t(item.error)}>
+            {t(item.error)}
           </div>
           <div className="ph-actions">
             {item.request && (
               <button className="ph-btn" onPointerDown={stop} onClick={() => retry(item)}>
-                <RotateCcw /> 重试
+                <RotateCcw /> {t('重试')}
               </button>
             )}
             <button className="ph-btn" onPointerDown={stop} onClick={() => removeItems([item.id])}>
-              <Trash2 /> 删除
+              <Trash2 /> {t('删除')}
             </button>
           </div>
         </div>
@@ -42,7 +43,7 @@ function Placeholder({ item, task }: { item: CanvasItem; task?: Task }) {
     );
   }
   const running = task?.status === 'running';
-  const label = task?.stage ?? '提交中…';
+  const label = task?.stage ?? t('提交中…');
   const progress = task?.progress ?? 0;
   return (
     <div className={`ph ${running ? 'ph-running' : ''}`}>
@@ -56,7 +57,7 @@ function Placeholder({ item, task }: { item: CanvasItem; task?: Task }) {
         )}
       </div>
       {task && (
-        <button className="ph-cancel" title="取消" onPointerDown={stop} onClick={() => void cancel(item)}>
+        <button className="ph-cancel" title={t('取消')} onPointerDown={stop} onClick={() => void cancel(item)}>
           <X />
         </button>
       )}
@@ -122,7 +123,7 @@ function VideoView({ item, full }: { item: CanvasItem; full: boolean }) {
       )}
       <div className="video-badge">
         {item.request?.op === 'video.generate' && <Volume2 />}
-        {asset.duration ? `${asset.duration.toFixed(1)}s` : '视频'}
+        {asset.duration ? `${asset.duration.toFixed(1)}s` : t('视频')}
       </div>
     </div>
   );
@@ -146,8 +147,8 @@ function NoteEditor({ item }: { item: CanvasItem }) {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) done();
       }}
     >
-      <input className="note-title" value={title} placeholder="标题" onChange={(e) => setTitle(e.target.value)} />
-      <textarea className="note-input" data-scrollable autoFocus value={text} placeholder="写点什么：剧本、分镜、备注…" onChange={(e) => setText(e.target.value)} />
+      <input className="note-title" value={title} placeholder={t('标题')} onChange={(e) => setTitle(e.target.value)} />
+      <textarea className="note-input" data-scrollable autoFocus value={text} placeholder={t('写点什么：剧本、分镜、备注…')} onChange={(e) => setText(e.target.value)} />
     </div>
   );
 }
@@ -162,7 +163,7 @@ function NoteView({ item }: { item: CanvasItem }) {
       {item.name && <div className="note-title">{item.name}</div>}
       {/* Scrolls (instead of panning the board) only once selected. */}
       <div className="note-body" {...(selected ? { 'data-scrollable': true } : {})}>
-        {item.text ? <Markdown text={item.text} /> : <span className="note-empty">双击编辑</span>}
+        {item.text ? <Markdown text={item.text} /> : <span className="note-empty">{t('双击编辑')}</span>}
       </div>
     </div>
   );

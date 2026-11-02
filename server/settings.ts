@@ -2,6 +2,8 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Settings } from '../shared/types.ts';
 import { config } from './config.ts';
+import { isLang } from '../shared/i18n.ts';
+import { setServerLang, t } from './i18n.ts';
 
 /** Settings changed in the app (data/settings.json); .env only supplies the defaults. */
 export class SettingsStore {
@@ -13,13 +15,16 @@ export class SettingsStore {
       const saved = JSON.parse(await readFile(this.file, 'utf8')) as Partial<Settings>;
       if (typeof saved.comfyUrl === 'string' && saved.comfyUrl) this.value.comfyUrl = saved.comfyUrl;
       if (saved.commercialOnly === true) this.value.commercialOnly = true;
+      if (isLang(saved.language)) this.value.language = saved.language;
     } catch {
       /* defaults */
     }
+    if (this.value.language) setServerLang(this.value.language);
   }
 
   async save(patch: Partial<Settings>) {
     this.value = { ...this.value, ...patch };
+    if (this.value.language) setServerLang(this.value.language);
     await writeFile(`${this.file}.tmp`, JSON.stringify(this.value, null, 1));
     await rename(`${this.file}.tmp`, this.file);
     return this.value;
@@ -31,6 +36,6 @@ export function normalizeComfyUrl(input: string): string {
   let s = input.trim();
   if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
   const u = new URL(s);
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('只支持 http / https 地址');
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(t('只支持 http / https 地址'));
   return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
 }

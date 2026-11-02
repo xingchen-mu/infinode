@@ -2,7 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
+import { msg } from '../../shared/i18n.ts';
 import { licenseLabel } from '../../shared/licenses.ts';
+import { list, t } from '../i18n.ts';
 import type { CanvasItem, ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
 import { GAP, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
 import { publicAsset } from '../assets.ts';
@@ -55,7 +57,7 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 /** A canvas operation, independent of the agent runtime (plain JSON Schema parameters). */
 export interface CanvasTool<A = Record<string, unknown>> {
   name: string;
-  /** Short name for the panel. */
+  /** Short name for the panel (Chinese source text, shown through t). */
   label: string;
   description: string;
   parameters: Record<string, unknown>;
@@ -72,7 +74,7 @@ export interface CanvasTool<A = Record<string, unknown>> {
   approve?(payload: Json, ctx: ToolContext): Promise<ToolOutput>;
 }
 
-const tool = <A>(t: CanvasTool<A>) => t as unknown as CanvasTool;
+const tool = <A>(def: CanvasTool<A>) => def as unknown as CanvasTool;
 
 const ids = (description: string, max?: number) => ({
   type: 'array',
@@ -141,8 +143,8 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
   const imageModel = (asked?: ImageModel): ImageModel => (asked === 'zimage' || asked === 'qwen' ? asked : commercial() ? 'zimage' : 'qwen');
   const noReferences = () =>
     commercial()
-      ? 'zimage 不支持参考图；用户开启了「只用可商用的模型」，Qwen-Image 2.1 也不能用。改图请用 list_workflows 里可商用的模板（如 Qwen-Image-Edit 2511），通过 run_workflow 运行'
-      : 'zimage 不支持参考图，要用参考图请用 qwen';
+      ? t('zimage 不支持参考图；用户开启了「只用可商用的模型」，Qwen-Image 2.1 也不能用。改图请用 list_workflows 里可商用的模板（如 Qwen-Image-Edit 2511），通过 run_workflow 运行')
+      : t('zimage 不支持参考图，要用参考图请用 qwen');
 
   const launchVideos = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
     const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
@@ -160,11 +162,11 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       };
     });
     const { items, failed } = await launchBatch(deps, writer, ctx.projectId, batch, { layout: 'beside', view: ctx.view });
-    if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
-    ctx.notify?.(`${host === 'panel' ? '用户确认后提交的' : ''} ${items.length} 段视频`.trim(), items);
+    if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
+    ctx.notify?.(host === 'panel' ? t('用户确认后提交的 {n} 段视频', { n: items.length }) : t('{n} 段视频', { n: items.length }), items);
     return {
       text: `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}${ctx.notify ? '' : `\n${afterBatch}`}`,
-      summary: `${items.length} 段已提交${failed.length ? `，${failed.length} 段失败：${failed[0].error}` : ''}`,
+      summary: failed.length ? t('{n} 段已提交，{failed} 段失败：{error}', { n: items.length, failed: failed.length, error: failed[0].error }) : t('{n} 段已提交', { n: items.length }),
       items: items.map((i) => i.id),
     };
   };
@@ -173,18 +175,18 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids?: string[] }>({
       name: 'read_board',
       readOnly: true,
-      label: '读取画布',
+      label: msg('读取画布'),
       description:
         '列出画布上的节点：id、图片还是视频、名称、尺寸或生成状态、由哪些节点生成、提示词。传 ids 时只看这些节点，给出完整提示词和生成参数。',
       parameters: { type: 'object', properties: { ids: ids('只看这些节点（可选）') } },
-      describe: (a) => (a.ids?.length ? `${a.ids.length} 个节点` : '全部节点'),
+      describe: (a) => (a.ids?.length ? t('{n} 个节点', { n: a.ids.length }) : t('全部节点')),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         if (args.ids?.length) {
           const items = findItems(p, args.ids);
           return {
             text: items.map((i) => describeItem(deps, i, 4000) + settingsOf(i.request)).join('\n'),
-            summary: `${items.length} 个节点`,
+            summary: t('{n} 个节点', { n: items.length }),
             items: items.map((i) => i.id),
           };
         }
@@ -193,7 +195,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const more = p.items.length > shown.length ? `\n（只列出了最新的 ${shown.length} 个）` : '';
         return {
           text: p.items.length ? `画布「${p.name}」共 ${p.items.length} 个节点：\n${lines.join('\n')}${more}` : `画布「${p.name}」是空的`,
-          summary: `${p.items.length} 个节点`,
+          summary: t('{n} 个节点', { n: p.items.length }),
         };
       },
     }),
@@ -201,11 +203,11 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids: string[] }>({
       name: 'view_images',
       readOnly: true,
-      label: '查看图片',
+      label: msg('查看图片'),
       vision: true,
       description: '查看画布上的图片节点（一次最多 4 张），用来检查生成质量或看懂参考图。视频看不了，可以看它的首帧或参考图。',
       parameters: { type: 'object', properties: { ids: { ...ids('图片节点 id', 4), minItems: 1 } }, required: ['ids'] },
-      describe: (a) => `${a.ids?.length ?? 0} 张`,
+      describe: (a) => t('{n} 张', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids.slice(0, 4));
@@ -225,13 +227,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           images.push({ data: (await deps.assets.read(stored)).toString('base64'), mimeType: stored.mime });
           lines.push(`第 ${images.length} 张：${describeItem(deps, item, 200)}`);
         }
-        return { text: lines.join('\n'), images, summary: `${images.length} 张图片`, items: items.map((i) => i.id) };
+        return { text: lines.join('\n'), images, summary: t('{n} 张图片', { n: images.length }), items: items.map((i) => i.id) };
       },
     }),
 
     tool<{ prompt: string; model?: ImageModel; reference_ids?: string[]; aspect?: string; quality?: '1k' | '2k'; count?: number; name?: string }>({
       name: 'generate_image',
-      label: '生成图片',
+      label: msg('生成图片'),
       description:
         '在画布上生成图片，结果放在第一张参考图旁边并连线。提交后立刻返回新节点 id，不等结果。' +
         'qwen（默认，Qwen-Image）：质量高、能写中文字，可传最多 10 张参考图做编辑、换背景、保持人物一致，提示词里用「图1」「图2」按 reference_ids 的顺序指代。' +
@@ -254,7 +256,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const model = imageModel(args.model);
         const refIds = args.reference_ids ?? [];
         if (model === 'zimage' && refIds.length) throw new Error(noReferences());
-        if (refIds.length > 10) throw new Error('参考图最多 10 张');
+        if (refIds.length > 10) throw new Error(t('参考图最多 {n} 张', { n: 10 }));
         const p = await readBoard(deps, ctx.projectId);
         const refs = findItems(p, refIds);
         const media = inputMedia(deps, refs, 'image');
@@ -271,7 +273,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const made = items.map((i) => `\`${i.id}\``).join(' ');
         return {
           text: `已提交 ${items.length} 张，新节点：${made}。每张${roughly(imageEstimate(deps.tasks.list(), request))}（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 张提交失败：${error}` : ''}`,
-          summary: `${items.length} 张已提交`,
+          summary: t('{n} 张已提交', { n: items.length }),
           items: items.map((i) => i.id),
         };
       },
@@ -279,7 +281,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
 
     tool<{ prompt: string; model?: VideoModel; image_ids?: string[]; aspect?: string; quality?: '480p' | '720p'; duration?: number; count?: number; name?: string }>({
       name: 'generate_video',
-      label: '生成视频',
+      label: msg('生成视频'),
       description:
         '用 MiniMax H3 在画布上生成带音频的视频，提交后立刻返回新节点 id，不等结果。很慢：每段 10 分钟以上，GPU 一次只跑一个任务。' +
         'minimax（默认）：image_ids 可传 0–2 张，第 1 张是首帧、第 2 张是尾帧，不传就是纯文生视频。' +
@@ -303,9 +305,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       async run(args, ctx) {
         const model: VideoModel = args.model === 'minimax-ref' ? 'minimax-ref' : 'minimax';
         const imageIds = args.image_ids ?? [];
-        if (model === 'minimax' && imageIds.length > 2) throw new Error('minimax 最多 2 张图（首帧、尾帧）；要用更多参考图请用 minimax-ref');
-        if (model === 'minimax-ref' && !imageIds.length) throw new Error('minimax-ref 至少需要 1 张参考图');
-        if (imageIds.length > 9) throw new Error('参考图最多 9 张');
+        if (model === 'minimax' && imageIds.length > 2) throw new Error(t('minimax 最多 2 张图（首帧、尾帧）；要用更多参考图请用 minimax-ref'));
+        if (model === 'minimax-ref' && !imageIds.length) throw new Error(t('minimax-ref 至少需要 1 张参考图'));
+        if (imageIds.length > 9) throw new Error(t('参考图最多 {n} 张', { n: 9 }));
         const p = await readBoard(deps, ctx.projectId);
         const frames = findItems(p, imageIds);
         const media = inputMedia(deps, frames, 'image');
@@ -323,7 +325,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const { items, error } = await launch(deps, writer, ctx.projectId, { request, count, inputs: frames, name: args.name, view: ctx.view });
         return {
           text: `已提交 ${items.length} 段 ${duration} 秒视频，新节点：${items.map((i) => `\`${i.id}\``).join(' ')}。预计 GPU ${roughly(videoEstimate(deps.tasks.list(), request.quality, items.map(() => duration)).seconds)}（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 段提交失败：${error}` : ''}`,
-          summary: `${items.length} 段已提交（${duration} 秒）`,
+          summary: t('{n} 段已提交（{duration} 秒）', { n: items.length, duration }),
           items: items.map((i) => i.id),
         };
       },
@@ -332,22 +334,22 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<Record<string, never>>({
       name: 'list_workflows',
       readOnly: true,
-      label: '查看工作流',
+      label: msg('查看工作流'),
       description: '列出用户导入的 ComfyUI 工作流和官方模板里现在能用的那些：id、名称、输出图片还是视频、需要哪些输入和参数。',
       parameters: { type: 'object', properties: {} },
-      describe: () => '可用的工作流',
+      describe: () => t('可用的工作流'),
       async run() {
         const caps = await deps.capabilities();
         const all = deps.workflows();
         const ready = all.filter((w) => !caps.features[`custom:${w.id}`]?.length && !w.inputs.some((i) => i.type === 'mask'));
         const lines = ready.map((w) => {
-          const license = licenseLabel(`custom:${w.id}`);
+          const license = licenseLabel(`custom:${w.id}`, (zh) => zh);
           return `- \`${w.id}\`「${w.name}」输出${w.kind === 'video' ? '视频' : '图片'}${license ? ` · ${license}` : ''}${w.description ? ` · ${clip(w.description, 80)}` : ''}\n  输入：${inputsLine(w)}`;
         });
         const blocked = all.length - ready.length;
         return {
           text: (ready.length ? `能用的工作流 ${ready.length} 个：\n${lines.join('\n')}` : '没有能用的工作流') + (blocked ? `\n另有 ${blocked} 个缺模型、缺节点、需要蒙版或不可商用，暂时不能用` : ''),
-          summary: `${ready.length} 个可用`,
+          summary: t('{n} 个可用', { n: ready.length }),
         };
       },
     }),
@@ -364,7 +366,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       name?: string;
     }>({
       name: 'run_workflow',
-      label: '运行工作流',
+      label: msg('运行工作流'),
       description: '运行 list_workflows 里列出的工作流，结果放到画布上并连线。提交后立刻返回新节点 id。图片、视频输入按工作流里的顺序传节点 id。',
       parameters: {
         type: 'object',
@@ -384,10 +386,10 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       describe: (a) => a.workflow_id,
       async run(args, ctx) {
         const wf = deps.workflows().find((w) => w.id === args.workflow_id);
-        if (!wf) throw new Error(`没有 id 为 ${args.workflow_id} 的工作流（用 list_workflows 查看）`);
-        if (wf.inputs.some((i) => i.type === 'mask')) throw new Error('这个工作流需要蒙版，请用户在画布上选中图片后手动运行');
+        if (!wf) throw new Error(t('没有 id 为 {id} 的工作流（用 list_workflows 查看）', { id: args.workflow_id }));
+        if (wf.inputs.some((i) => i.type === 'mask')) throw new Error(t('这个工作流需要蒙版，请用户在画布上选中图片后手动运行'));
         const prompt = wf.inputs.find((i) => i.type === 'prompt');
-        if (prompt && !String(prompt.default ?? '').trim() && !args.prompt?.trim()) throw new Error('这个工作流需要提示词');
+        if (prompt && !String(prompt.default ?? '').trim() && !args.prompt?.trim()) throw new Error(t('这个工作流需要提示词'));
         const p = await readBoard(deps, ctx.projectId);
         const imageItems = findItems(p, args.image_ids ?? []);
         const videoItems = findItems(p, args.video_ids ?? []);
@@ -395,9 +397,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           const slots = wf.inputs.filter((i) => i.type === kind);
           const given = (kind === 'image' ? imageItems : videoItems).length;
           const required = slots.filter((i) => !i.optional).length;
-          const name = kind === 'image' ? '图片' : '视频';
-          if (given > slots.length) throw new Error(`这个工作流最多 ${slots.length} 个${name}输入`);
-          if (given < required) throw new Error(`这个工作流需要 ${required} 个${name}输入：${slots.map((s) => s.label).join('、')}`);
+          const labels = list(slots.map((s) => t(s.label)));
+          if (given > slots.length) throw new Error(kind === 'image' ? t('这个工作流最多 {n} 个图片输入', { n: slots.length }) : t('这个工作流最多 {n} 个视频输入', { n: slots.length }));
+          if (given < required) throw new Error(kind === 'image' ? t('这个工作流需要 {n} 个图片输入：{list}', { n: required, list: labels }) : t('这个工作流需要 {n} 个视频输入：{list}', { n: required, list: labels }));
         }
         const images = inputMedia(deps, imageItems, 'image');
         const videos = inputMedia(deps, videoItems, 'video');
@@ -422,7 +424,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         });
         return {
           text: `已提交「${wf.name}」${items.length} 次，新节点：${items.map((i) => `\`${i.id}\``).join(' ')}。${error ? `另有 ${count - items.length} 次提交失败：${error}` : ''}`,
-          summary: `${wf.name} · ${items.length} 个已提交`,
+          summary: `${t(wf.name)} · ${t('{n} 个已提交', { n: items.length })}`,
           items: items.map((i) => i.id),
         };
       },
@@ -431,7 +433,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids: string[]; timeout_seconds?: number }>({
       name: 'wait_for_items',
       readOnly: true,
-      label: '等待结果',
+      label: msg('等待结果'),
       description:
         '等这些节点生成完（或失败），返回每个的结果。需要拿结果做下一步时才用；视频很慢，除非用户要求，否则提交后不必等。超时后返回当前进度，可以再次调用。',
       parameters: {
@@ -442,7 +444,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         },
         required: ['ids'],
       },
-      describe: (a) => `${a.ids?.length ?? 0} 个节点`,
+      describe: (a) => t('{n} 个节点', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids);
@@ -468,8 +470,8 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
               resolve(now);
             }
           };
-          const onTask = (t: Task) => {
-            if (taskIds.has(t.id)) check();
+          const onTask = (task: Task) => {
+            if (taskIds.has(task.id)) check();
           };
           deps.tasks.on('task', onTask);
           const timer = setInterval(check, 5000);
@@ -489,7 +491,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           text:
             lines.join('\n') +
             (!open ? '' : ctx.interrupt?.aborted ? '\n（用户发来了新消息，先停止等待）' : '\n（等待超时，可以稍后再调用 wait_for_items）'),
-          summary: [`${done}/${final.length} 完成`, failed ? `${failed} 个失败` : '', open ? `${open} 个还在生成` : ''].filter(Boolean).join('，'),
+          summary: [t('{done}/{total} 完成', { done, total: final.length }), failed ? t('{n} 个失败', { n: failed }) : '', open ? t('{n} 个还在生成', { n: open }) : ''].filter(Boolean).join(t('，')),
           items: items.map((i) => i.id),
         };
       },
@@ -497,7 +499,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
 
     tool<{ id?: string; title: string; content: string }>({
       name: 'write_note',
-      label: '写文本',
+      label: msg('写文本'),
       description:
         '在画布上新建或更新一个文本节点，用来放剧本、角色设定、分镜表、备注。内容是简单的 Markdown，表格用 | 分隔。' +
         '更新时传 id，会整段替换。用户可能在画布上改过，改之前先用 read_board 读最新内容。',
@@ -518,22 +520,22 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const size = { w: wide ? 760 : 440, h: Math.min(1400, Math.max(180, 64 + lines * 22)) };
         if (args.id) {
           const [item] = findItems(p, [args.id]);
-          if (item.kind !== 'text') throw new Error(`节点 ${args.id} 不是文本节点`);
+          if (item.kind !== 'text') throw new Error(t('节点 {id} 不是文本节点', { id: args.id }));
           await patchBoard(deps, ctx.projectId, { upsert: [{ ...item, name: args.title.trim() || item.name, text: args.content, h: Math.max(item.h, size.h) }] });
-          return { text: `已更新文本节点 \`${item.id}\``, summary: `更新「${args.title}」`, items: [item.id] };
+          return { text: `已更新文本节点 \`${item.id}\``, summary: t('更新「{title}」', { title: args.title }), items: [item.id] };
         }
         const bounds = boundsOf(p.items);
         const start = ctx.view ? { x: ctx.view.x - size.w / 2, y: ctx.view.y - size.h / 2 } : bounds ? { x: bounds.x - size.w - GAP * 3, y: bounds.y } : { x: 0, y: 0 };
         const [pos] = placeRow(p.items, start, [size]);
         const note: CanvasItem = { id: nanoid(10), kind: 'text', x: Math.round(pos.x), y: Math.round(pos.y), ...size, name: args.title.trim(), text: args.content, createdAt: Date.now() };
         await patchBoard(deps, ctx.projectId, { upsert: [note] });
-        return { text: `已新建文本节点 \`${note.id}\`「${note.name}」`, summary: `「${args.title}」`, items: [note.id] };
+        return { text: `已新建文本节点 \`${note.id}\`「${note.name}」`, summary: t('「{title}」', { title: args.title }), items: [note.id] };
       },
     }),
 
     tool<{ jobs: { prompt: string; reference_ids?: string[]; aspect?: string; name?: string }[]; model?: ImageModel; quality?: '1k' | '2k'; layout?: 'row' | 'column' }>({
       name: 'batch_generate_images',
-      label: '批量出图',
+      label: msg('批量出图'),
       description:
         `一次提交多张图（最多 ${MAX_BATCH} 张），每张有自己的提示词和参考图（规则同 generate_image）。新节点按顺序排成一行或一列。` +
         `提交后立刻返回；${afterBatch}分镜关键帧用 layout=column（按镜头顺序从上到下），name 写镜头编号。`,
@@ -561,14 +563,14 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         },
         required: ['jobs'],
       },
-      describe: (a) => `${a.jobs?.length ?? 0} 张`,
+      describe: (a) => t('{n} 张', { n: a.jobs?.length ?? 0 }),
       async run(args, ctx) {
         const model = imageModel(args.model);
         const p = await readBoard(deps, ctx.projectId);
         // Check every job before queueing any, so a bad id does not leave half a batch.
         const jobs: BatchJob[] = args.jobs.slice(0, MAX_BATCH).map((j, n) => {
           const refIds = j.reference_ids ?? [];
-          if (model === 'zimage' && refIds.length) throw new Error(`第 ${n + 1} 张：${noReferences()}`);
+          if (model === 'zimage' && refIds.length) throw new Error(t('第 {n} 张：{reason}', { n: n + 1, reason: noReferences() }));
           const refs = findItems(p, refIds.slice(0, 10));
           const media = inputMedia(deps, refs, 'image');
           return {
@@ -585,13 +587,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           };
         });
         const { items, failed } = await launchBatch(deps, writer, ctx.projectId, jobs, { layout: args.layout === 'column' ? 'column' : 'row', view: ctx.view });
-        if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
-        ctx.notify?.(`${items.length} 张图片`, items);
+        if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
+        ctx.notify?.(t('{n} 张图片', { n: items.length }), items);
         const list = items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('\n');
         const errors = failed.map((f) => `第 ${f.index + 1} 张提交失败：${f.error}`).join('\n');
         return {
           text: `已提交 ${items.length} 张：\n${list}${errors ? `\n${errors}` : ''}\n${ctx.notify ? '全部结束时你会收到通知。' : afterBatch}`,
-          summary: `${items.length} 张已提交${failed.length ? `，${failed.length} 张失败` : ''}`,
+          summary: failed.length ? t('{n} 张已提交，{failed} 张失败', { n: items.length, failed: failed.length }) : t('{n} 张已提交', { n: items.length }),
           items: items.map((i) => i.id),
         };
       },
@@ -599,7 +601,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
 
     tool<{ jobs: { prompt: string; first_frame_id: string; last_frame_id?: string; duration?: number; name?: string }[]; quality?: '480p' | '720p' }>({
       name: 'batch_generate_videos',
-      label: '批量出视频',
+      label: msg('批量出视频'),
       description:
         `一次提交多段图生视频（MiniMax H3，最多 ${MAX_BATCH} 段），每段从自己的首帧图开始，可选尾帧；视频放在首帧右边。` +
         (host === 'panel'
@@ -628,7 +630,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         },
         required: ['jobs'],
       },
-      describe: (a) => `${a.jobs?.length ?? 0} 段`,
+      describe: (a) => t('{n} 段', { n: a.jobs?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const quality = args.quality === '720p' ? '720p' : '480p';
@@ -646,10 +648,15 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         }
         return {
           text: `已在面板上请用户确认：${jobs.length} 段、共 ${seconds} 秒、${quality}，预计 GPU 约 ${minutes} 分钟。用户确认后会自动提交，全部结束时你会收到通知。现在告诉用户在等他确认，然后结束这一轮。`,
-          summary: '等待确认',
+          summary: t('等待确认'),
           approval: {
-            title: `生成 ${jobs.length} 段视频`,
-            detail: `共 ${seconds} 秒 · ${quality} · 预计 GPU 约 ${minutes} 分钟（${estimate.measured ? '按这台服务器以往的速度' : '按参考显卡的速度'}估算，期间其他生成任务要排队）`,
+            title: t('生成 {n} 段视频', { n: jobs.length }),
+            detail: t(
+              estimate.measured
+                ? '共 {seconds} 秒 · {quality} · 预计 GPU 约 {minutes} 分钟（按这台服务器以往的速度估算，期间其他生成任务要排队）'
+                : '共 {seconds} 秒 · {quality} · 预计 GPU 约 {minutes} 分钟（按参考显卡的速度估算，期间其他生成任务要排队）',
+              { seconds, quality, minutes },
+            ),
             payload: { quality, jobs },
           },
         };
@@ -660,11 +667,11 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids: string[] }>({
       name: 'review_items',
       readOnly: true,
-      label: '审片',
+      label: msg('审片'),
       vision: true,
       description: '把最多 16 个图片或视频节点拼成一张带编号的拼图来检查（视频取第 1 秒的画面）。比 view_images 省，适合整批检查人物是否一致、有没有多余的人、背景对不对。',
       parameters: { type: 'object', properties: { ids: { ...ids('节点 id', 16), minItems: 1 } }, required: ['ids'] },
-      describe: (a) => `${a.ids?.length ?? 0} 个`,
+      describe: (a) => t('{n} 个', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids.slice(0, 16));
@@ -675,19 +682,19 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           const state = stateOf(deps, item);
           const stored = state.done ? deps.assets.get(state.media.id) : undefined;
           if (!state.done || !stored) {
-            skipped.push(`\`${item.id}\`（${state.done ? '文件不见了' : state.text}）`);
+            skipped.push(`\`${item.id}\` (${state.done ? t('文件不见了') : state.text})`);
             continue;
           }
           const path = deps.assets.path(stored);
           frames.push(stored.kind === 'video' ? await videoFrame(path, 1) : path);
           lines.push(`${frames.length} = ${describeItem(deps, item, 120)}`);
         }
-        if (!frames.length) throw new Error(`没有可看的画面：${skipped.join('、')}`);
+        if (!frames.length) throw new Error(t('没有可看的画面：{list}', { list: list(skipped) }));
         const sheet = await contactSheet(frames);
         return {
           text: `拼图里的编号：\n${lines.join('\n')}${skipped.length ? `\n跳过：${skipped.join('、')}` : ''}`,
           images: [{ data: sheet.toString('base64'), mimeType: 'image/jpeg' }],
-          summary: `${frames.length} 个`,
+          summary: t('{n} 个', { n: frames.length }),
           items: items.map((i) => i.id),
         };
       },
@@ -696,11 +703,11 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids: string[] }>({
       name: 'inspect_clips',
       readOnly: true,
-      label: '听声音',
+      label: msg('听声音'),
       description:
         '查看视频节点的时长，以及哪几秒有明显的声音（生成的镜头里通常就是台词；环境声很轻，不算）。剪辑前用它决定每段裁到哪里：台词常常在镜头后半段才说，别按分镜秒数直接裁掉。',
       parameters: { type: 'object', properties: { ids: { ...ids('视频节点 id', 40), minItems: 1 } }, required: ['ids'] },
-      describe: (a) => `${a.ids?.length ?? 0} 段`,
+      describe: (a) => t('{n} 段', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids);
@@ -708,20 +715,20 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const lines: string[] = [];
         for (const [i, m] of media.entries()) {
           const stored = deps.assets.get(m.id);
-          if (!stored) throw new Error(`节点 ${items[i].id} 的视频文件不见了`);
+          if (!stored) throw new Error(t('节点 {id} 的视频文件不见了', { id: items[i].id }));
           const path = deps.assets.path(stored);
           const info = await probe(path);
           const spans = info.hasAudio ? await soundSpans(path, info.duration) : [];
           const sound = !info.hasAudio ? '没有音轨' : spans.length ? `明显的声音在 ${spans.map((s) => `${s.start.toFixed(2)}–${s.end.toFixed(2)}`).join('、')} 秒` : '只有很轻的环境声，没有台词';
           lines.push(`\`${items[i].id}\`${items[i].name ? ` ${items[i].name}` : ''}：${info.duration.toFixed(2)} 秒；${sound}`);
         }
-        return { text: lines.join('\n'), summary: `${items.length} 段`, items: items.map((i) => i.id) };
+        return { text: lines.join('\n'), summary: t('{n} 段', { n: items.length }), items: items.map((i) => i.id) };
       },
     }),
 
     tool<{ clips: { id: string; start?: number; end?: number }[]; name?: string }>({
       name: 'assemble_video',
-      label: '剪辑成片',
+      label: msg('剪辑成片'),
       description:
         '按顺序把视频节点拼成一条成片（硬切），每段可以裁头尾（start/end 是这段里的秒数）。保留每段自带的声音。成片放在画布上，连回每一段。在运行服务的电脑上用 ffmpeg 处理，几十秒到几分钟。',
       parameters: {
@@ -741,14 +748,14 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         },
         required: ['clips'],
       },
-      describe: (a) => `${a.clips?.length ?? 0} 段`,
+      describe: (a) => t('{n} 段', { n: a.clips?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.clips.map((c) => c.id));
         const media = inputMedia(deps, items, 'video');
         const clips = media.map((m, i) => {
           const stored = deps.assets.get(m.id);
-          if (!stored) throw new Error(`节点 ${items[i].id} 的视频文件不见了`);
+          if (!stored) throw new Error(t('节点 {id} 的视频文件不见了', { id: items[i].id }));
           return { path: deps.assets.path(stored), start: args.clips[i].start, end: args.clips[i].end };
         });
         // Speech that the trims would cut off: reported, so the model can fix the edit.
@@ -790,7 +797,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           const warning = cutOff.length ? `\n注意，这些声音被裁掉了：\n${cutOff.map((w) => `- ${w}`).join('\n')}\n如果是台词，调整裁剪范围后重新剪一版。` : '';
           return {
             text: `成片 \`${item.id}\`：${clips.length} 段，${info.duration.toFixed(1)} 秒，${info.width}×${info.height}${warning}`,
-            summary: `${info.duration.toFixed(1)} 秒${cutOff.length ? `，有 ${cutOff.length} 处声音被裁掉` : ''}`,
+            summary: cutOff.length ? t('{duration} 秒，有 {n} 处声音被裁掉', { duration: info.duration.toFixed(1), n: cutOff.length }) : t('{duration} 秒', { duration: info.duration.toFixed(1) }),
             items: [item.id],
           };
         } finally {
@@ -802,14 +809,14 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     tool<{ ids: string[]; remove?: boolean }>({
       name: 'cancel_items',
       destructive: true,
-      label: '取消生成',
+      label: msg('取消生成'),
       description: '取消这些节点还在排队或生成中的任务。remove=true 时顺便把这些占位节点从画布上删掉（只删还没有结果的，已经生成好的图和视频不会删）。',
       parameters: {
         type: 'object',
         properties: { ids: { ...ids('节点 id'), minItems: 1 }, remove: { type: 'boolean', description: '同时删掉这些占位节点，默认 false' } },
         required: ['ids'],
       },
-      describe: (a) => `${a.ids?.length ?? 0} 个节点`,
+      describe: (a) => t('{n} 个节点', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids);
@@ -826,7 +833,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         if (removable.length) await patchBoard(deps, ctx.projectId, { remove: removable });
         return {
           text: (cancelled.length ? `已取消：${cancelled.map((id) => `\`${id}\``).join(' ')}` : '这些节点没有进行中的任务') + (removable.length ? `；已从画布删掉 ${removable.length} 个占位` : ''),
-          summary: `取消了 ${cancelled.length} 个${removable.length ? `，删掉 ${removable.length} 个占位` : ''}`,
+          summary: removable.length ? t('取消了 {n} 个，删掉 {removed} 个占位', { n: cancelled.length, removed: removable.length }) : t('取消了 {n} 个', { n: cancelled.length }),
           items: cancelled.filter((id) => !removable.includes(id)),
         };
       },

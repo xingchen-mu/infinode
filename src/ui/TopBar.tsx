@@ -7,6 +7,7 @@ import { api } from '../lib/api';
 import { applyTask, toast, useStore, zoomAt } from '../store';
 import { createProject, openProject } from '../project';
 import { AgentButton } from './AgentPanel';
+import { t } from '../i18n';
 
 function useOutsideClose(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null);
@@ -21,12 +22,12 @@ function useOutsideClose(open: boolean, close: () => void) {
   return ref;
 }
 
-function timeAgo(t: number) {
-  const s = (Date.now() - t) / 1000;
-  if (s < 60) return '刚刚';
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
-  return new Date(t).toLocaleDateString();
+function timeAgo(at: number) {
+  const s = (Date.now() - at) / 1000;
+  if (s < 60) return t('刚刚');
+  if (s < 3600) return t('{n} 分钟前', { n: Math.floor(s / 60) });
+  if (s < 86400) return t('{n} 小时前', { n: Math.floor(s / 3600) });
+  return new Date(at).toLocaleDateString();
 }
 
 function ProjectMenu() {
@@ -50,7 +51,7 @@ function ProjectMenu() {
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
         spellCheck={false}
       />
-      <button className="icon-btn small" onClick={() => setOpen((v) => !v)} title="切换画布">
+      <button className="icon-btn small" onClick={() => setOpen((v) => !v)} title={t('切换画布')}>
         <ChevronDown />
       </button>
       {open && (
@@ -62,7 +63,7 @@ function ProjectMenu() {
               void createProject();
             }}
           >
-            <Plus /> 新建画布
+            <Plus /> {t('新建画布')}
           </button>
           <div className="menu-sep" />
           {list.map((p) => (
@@ -78,7 +79,7 @@ function ProjectMenu() {
                 <div className="project-meta">
                   <span>{p.name}</span>
                   <small>
-                    {p.itemCount} 个元素 · {timeAgo(p.updatedAt)}
+                    {t('{n} 个元素 · {ago}', { n: p.itemCount, ago: timeAgo(p.updatedAt) })}
                   </small>
                 </div>
                 {p.id === projectId && <Check className="dd-check" />}
@@ -86,9 +87,9 @@ function ProjectMenu() {
               {p.id !== projectId && (
                 <button
                   className="icon-btn small danger"
-                  title="删除画布"
+                  title={t('删除画布')}
                   onClick={async () => {
-                    if (!confirm(`删除画布「${p.name}」？画布里的图片文件不会被删除。`)) return;
+                    if (!confirm(t('删除画布「{name}」？画布里的图片文件不会被删除。', { name: p.name }))) return;
                     await api.deleteProject(p.id);
                     setList((l) => l.filter((x) => x.id !== p.id));
                   }}
@@ -104,25 +105,25 @@ function ProjectMenu() {
   );
 }
 
-function opLabel(t: Task) {
-  const r = t.request;
+function opLabel(task: Task) {
+  const r = task.request;
   switch (r.op) {
     case 'image.generate':
-      return r.images?.length ? '参考图生成' : '文生图';
+      return r.images?.length ? t('参考图生成') : t('文生图');
     case 'video.generate':
-      return r.model === 'minimax-ref' ? '多图参考视频' : r.images?.length ? '图生视频' : '文生视频';
+      return r.model === 'minimax-ref' ? t('多图参考视频') : r.images?.length ? t('图生视频') : t('文生视频');
     case 'image.inpaint':
-      return '局部重绘';
+      return t('局部重绘');
     case 'image.erase':
-      return '消除';
+      return t('消除');
     case 'image.outpaint':
-      return '扩图';
+      return t('扩图');
     case 'image.removeBg':
-      return '抠图';
+      return t('抠图');
     case 'image.upscale':
-      return '超清';
+      return t('超清');
     case 'custom':
-      return [...useStore.getState().workflows, ...useStore.getState().presets].find((w) => w.id === r.workflow)?.name ?? '自定义工作流';
+      return t([...useStore.getState().workflows, ...useStore.getState().presets].find((w) => w.id === r.workflow)?.name ?? '自定义工作流');
   }
 }
 
@@ -131,39 +132,39 @@ function TaskMenu() {
   const [open, setOpen] = useState(false);
   const ref = useOutsideClose(open, () => setOpen(false));
   const list = Object.values(tasks).sort((a, b) => b.createdAt - a.createdAt);
-  const active = list.filter((t) => t.status === 'queued' || t.status === 'running');
+  const active = list.filter((task) => task.status === 'queued' || task.status === 'running');
   if (!list.length) return null;
   return (
     <div className="task-menu-wrap" ref={ref}>
       <button className={`pill ${active.length ? 'busy' : ''}`} onClick={() => setOpen((v) => !v)}>
         {active.length ? <Loader2 className="spin" /> : <Check />}
-        {active.length ? `${active.length} 个任务进行中` : '任务'}
+        {active.length ? t('{n} 个任务进行中', { n: active.length }) : t('任务')}
       </button>
       {open && (
         <div className="menu task-menu" data-scrollable>
-          {list.slice(0, 30).map((t) => (
-            <div key={t.id} className={`task-row ${t.status}`}>
+          {list.slice(0, 30).map((task) => (
+            <div key={task.id} className={`task-row ${task.status}`}>
               <div className="task-main">
                 <div className="task-title">
-                  <span>{opLabel(t)}</span>
-                  <small>{'prompt' in t.request && t.request.prompt ? t.request.prompt : ''}</small>
+                  <span>{opLabel(task)}</span>
+                  <small>{'prompt' in task.request && task.request.prompt ? task.request.prompt : ''}</small>
                 </div>
                 <div className="task-status">
-                  {t.status === 'done' ? '完成' : t.status === 'error' ? t.error ?? '失败' : t.status === 'cancelled' ? '已取消' : t.stage ?? '排队中'}
+                  {task.status === 'done' ? t('完成') : task.status === 'error' ? t(task.error ?? '失败') : task.status === 'cancelled' ? t('已取消') : (task.stage ?? t('排队中'))}
                 </div>
-                {(t.status === 'running' || t.status === 'queued') && (
+                {(task.status === 'running' || task.status === 'queued') && (
                   <div className="task-progress">
-                    <div style={{ width: `${Math.round(t.progress * 100)}%` }} />
+                    <div style={{ width: `${Math.round(task.progress * 100)}%` }} />
                   </div>
                 )}
               </div>
-              {(t.status === 'running' || t.status === 'queued') && (
+              {(task.status === 'running' || task.status === 'queued') && (
                 <button
                   className="icon-btn small"
-                  title="取消"
+                  title={t('取消')}
                   onClick={async () => {
                     try {
-                      applyTask(await api.cancelTask(t.id));
+                      applyTask(await api.cancelTask(task.id));
                     } catch (err) {
                       toast((err as Error).message, 'error');
                     }
@@ -186,13 +187,13 @@ function ZoomControl() {
   const step = (k: number) => zoomAt(screen.w / 2, screen.h / 2, zoom * k);
   return (
     <div className="zoom">
-      <button className="icon-btn small" onClick={() => step(1 / 1.25)} title="缩小 (⌘-)">
+      <button className="icon-btn small" onClick={() => step(1 / 1.25)} title={t('缩小 (⌘-)')}>
         <Minus />
       </button>
-      <button className="zoom-val" onClick={fitAll} title="适应画布 (⇧1)">
+      <button className="zoom-val" onClick={fitAll} title={t('适应画布 (⇧1)')}>
         {Math.round(zoom * 100)}%
       </button>
-      <button className="icon-btn small" onClick={() => step(1.25)} title="放大 (⌘=)">
+      <button className="icon-btn small" onClick={() => step(1.25)} title={t('放大 (⌘=)')}>
         <Plus />
       </button>
     </div>
@@ -215,21 +216,21 @@ export function TopBar() {
           </svg>
         </div>
         <ProjectMenu />
-        <span className={`save-state ${saveState}`}>{saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : '已保存'}</span>
+        <span className={`save-state ${saveState}`}>{saveState === 'saving' ? t('保存中…') : saveState === 'error' ? t('保存失败') : t('已保存')}</span>
       </div>
       <div className="topbar right" data-ui>
         <AgentButton />
         <TaskMenu />
-        <button className="pill" onClick={() => useStore.setState({ modal: { type: 'workflows' } })} title="导入和管理自己的 ComfyUI 工作流">
-          <Puzzle /> 我的工作流
+        <button className="pill" onClick={() => useStore.setState({ modal: { type: 'workflows' } })} title={t('导入和管理自己的 ComfyUI 工作流')}>
+          <Puzzle /> {t('我的工作流')}
         </button>
         <button
           className={`pill status ${serverOnline && comfyOnline ? 'ok' : 'bad'}`}
           onClick={() => useStore.setState({ modal: { type: 'settings' } })}
-          title={!serverOnline ? '本地服务未连接' : comfyOnline ? `ComfyUI ${caps?.comfyVersion ?? ''}` : 'ComfyUI 未连接：检查 SSH 隧道和服务器上的 ComfyUI'}
+          title={!serverOnline ? t('本地服务未连接') : comfyOnline ? `ComfyUI ${caps?.comfyVersion ?? ''}` : t('ComfyUI 未连接：检查 SSH 隧道和服务器上的 ComfyUI')}
         >
           {serverOnline && comfyOnline ? <Cloud /> : <CloudOff />}
-          {!serverOnline ? '本地服务未连接' : comfyOnline ? caps?.gpu ?? 'ComfyUI 已连接' : 'ComfyUI 未连接'}
+          {!serverOnline ? t('本地服务未连接') : comfyOnline ? caps?.gpu ?? t('ComfyUI 已连接') : t('ComfyUI 未连接')}
           <SettingsIcon className="pill-gear" />
         </button>
         <ZoomControl />
