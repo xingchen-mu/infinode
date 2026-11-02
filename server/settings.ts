@@ -12,6 +12,7 @@ export class SettingsStore {
     try {
       const saved = JSON.parse(await readFile(this.file, 'utf8')) as Partial<Settings>;
       if (typeof saved.comfyUrl === 'string' && saved.comfyUrl) this.value.comfyUrl = saved.comfyUrl;
+      if (saved.commercialOnly === true) this.value.commercialOnly = true;
     } catch {
       /* defaults */
     }

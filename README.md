@@ -86,7 +86,7 @@ npm run dev
 | 局域网 / 服务器，可直接访问 | ComfyUI 启动时加 `--listen`，在设置里填 `http://服务器IP:8188` |
 | 服务器，只监听它自己的 127.0.0.1 | 复制 `.env.example` 为 `.env`，填上 `SSH_HOST`（`~/.ssh/config` 里的主机别名，需免密登录）。`npm run dev` 会自动建立并保持 SSH 隧道 |
 
-Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`。注意后端没有登录验证，同一网络里的人都能使用和删除你的作品，只在你信任的网络里这样做，见 [SECURITY.md](SECURITY.md)。
+Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的其他设备也能用，在 `.env` 里设置 `HOST=0.0.0.0`，然后用 IP 地址或 `xxx.local` 打开；想用别的域名访问（比如经过反向代理），把它加进 `.env` 的 `ALLOWED_HOSTS`。注意后端没有登录验证，同一网络里的人都能使用和删除你的作品，只在你信任的网络里这样做，见 [SECURITY.md](SECURITY.md)。
 
 ## 使用
 
@@ -217,7 +217,13 @@ Infinode 的许可证只管它自己的代码，你用的每个模型另有许�
 - **Qwen-Image 2.1**：只允许研究和评估用途，商用要另外向模型方申请授权。需要商用的话，文生图和改图可以换用模板库里 Apache 2.0 的 Qwen-Image 2512、Qwen-Image-Edit 2511 或 Z-Image Turbo。
 - **MiniMax H3**：可以商用，但商用产品的界面上要标明"MiniMax H3"，年收入超过 2000 万美元要另外取得授权。它的许可证**不覆盖美国、欧盟、英国和韩国**：在这些地区不能使用这个模型，也不能展示它生成的内容。
 
-模板库里的模型：Z-Image Turbo、Qwen-Image 2512 / Edit 2509 / Edit 2511、Wan 2.2、SeedVR2 是 Apache 2.0；FLUX.2 [dev]、FLUX.2 [klein] 9B、FLUX.1 Kontext [dev] 不能商用；LTX-2.3、Krea 2 是带条件的社区许可。以各模型页面上的许可证原文为准。
+模板库里的模型：Z-Image Turbo、Qwen-Image 2512 / Edit 2509 / Edit 2511、FLUX.2 [klein] 4B、Wan 2.2、SeedVR2 是 Apache 2.0；FLUX.2 [dev]、FLUX.2 [klein] 9B、FLUX.1 Kontext [dev] 不能商用；LTX-2.3、Krea 2 是带条件的社区许可，SDXL 可商用但有使用限制条款。以各模型页面上的许可证原文为准。
+
+### 商用模式
+
+设置里打开「**只用可以商用的模型**」后，只允许研究用途或不能商用的模型会停用：内置的 Qwen-Image 2.1 生图和基于它的局部重绘、消除、扩图、抠图，以及模板库里的 FLUX.2 [dev] 等，界面上会写明原因。出图默认换成 Z-Image Turbo，改图请用模板库里标「可商用」的模板（如 Qwen-Image-Edit 2511）。画布助手和 MCP 也遵守这个设置。模型列表、模板库和设置页都标出了每个模型「可商用 / 有条件商用 / 不可商用」。
+
+这些标注只覆盖内置工具和官方模板，你自己导入的工作流不受影响；标注仅供参考，以各模型页面上的许可证原文为准。
 
 ## 常见问题
 
@@ -227,7 +233,9 @@ Infinode 的许可证只管它自己的代码，你用的每个模型另有许�
 
 **远程服务器上传图片很慢？** 本地图片第一次用作输入时需要传到服务器，取决于你的上行带宽，每张只传一次。画布上生成的结果本来就在服务器上，接着编辑不需要上传。
 
-**数据存在哪？** 都在项目的 `data/` 目录：图片视频、画布、任务记录、导入的工作流。删掉它即可清空。
+**数据存在哪？** 都在项目的 `data/` 目录：图片视频、画布、任务记录、导入的工作流、助手的对话，以及画布用的缩略图（`data/thumbs`，删掉会自动重新生成）。删掉整个 `data/` 即可清空。
+
+**画布上节点很多会卡吗？** 画布只渲染视野附近的节点；节点在屏幕上显示得小的时候用缩略图和视频封面，放大到看得清细节时才加载原图和视频。一张有 70 多个节点、35 段视频的画布，缩到能看全的时候只需要加载约 1MB。
 
 **生产部署？** `npm run build && npm start`，只占用一个端口（默认 `http://127.0.0.1:8787`）。
 
@@ -262,6 +270,7 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 - Drag a line out of an image to place the next generation exactly where you want it
 - Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`). It can take a short drama from a one-line idea to a cut: script and shot list as text notes, character and scene sheets, keyframes, one video per shot (after you approve the GPU time), then an edit (needs ffmpeg)
 - Text notes on the board for scripts, shot lists and comments
+- A commercial-only switch in Settings turns off research-only and non-commercial models; every built-in tool and template is labeled with its license
 - Built-in MCP server at `http://127.0.0.1:8787/mcp` (this machine only): Claude Code (`claude mcp add --transport http infinode http://127.0.0.1:8787/mcp`), Codex (`codex mcp add infinode --url http://127.0.0.1:8787/mcp`) and other agents get the same canvas tools as the assistant, and know which board and items you have selected in the page
 
 ```bash

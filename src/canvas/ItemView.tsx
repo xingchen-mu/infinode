@@ -1,5 +1,6 @@
 import { AlertTriangle, Loader2, RotateCcw, Trash2, Volume2, X } from 'lucide-react';
 import { memo, useEffect, useRef, useState } from 'react';
+import { thumbUrl } from '../../shared/media';
 import type { CanvasItem, Task } from '../../shared/types';
 import { cancel, retry } from '../lib/actions';
 import { api } from '../lib/api';
@@ -66,36 +67,64 @@ function Placeholder({ item, task }: { item: CanvasItem; task?: Task }) {
   );
 }
 
-function VideoView({ item }: { item: CanvasItem }) {
+/** The thumbnail while the item is small on screen; the original once it is shown large (or the thumbnail fails). */
+function ImageView({ item, full }: { item: CanvasItem; full: boolean }) {
+  const [failed, setFailed] = useState(false);
+  const asset = item.asset!;
+  return (
+    <img
+      src={full || failed ? asset.url : thumbUrl(asset.url)}
+      alt={item.name ?? ''}
+      draggable={false}
+      decoding="async"
+      onError={() => !full && setFailed(true)}
+    />
+  );
+}
+
+/**
+ * A frame while the video is small on screen; the player once it is shown large or hovered (then it plays).
+ * A board of many clips would otherwise keep a decoder and a download going for each.
+ */
+function VideoView({ item, full }: { item: CanvasItem; full: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   const asset = item.asset!;
-  const [duration, setDuration] = useState<number | null>(null);
+  const [hover, setHover] = useState(false);
+  const live = full || hover;
+  useEffect(() => {
+    if (hover) void ref.current?.play().catch(() => {});
+    else ref.current?.pause();
+  }, [hover, live]);
   return (
-    <>
-      <video
-        ref={ref}
-        src={asset.url}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        onMouseEnter={() => void ref.current?.play().catch(() => {})}
-        onMouseLeave={() => ref.current?.pause()}
-        onLoadedMetadata={(e) => {
-          const v = e.currentTarget;
-          setDuration(v.duration);
-          if (v.videoWidth && v.videoHeight && (v.videoWidth !== asset.width || v.videoHeight !== asset.height)) {
-            const fixed = { ...asset, width: v.videoWidth, height: v.videoHeight };
-            patchItem(item.id, { asset: fixed, h: Math.round(item.w * (v.videoHeight / v.videoWidth)) });
-            void api.setAssetSize(asset.id, v.videoWidth, v.videoHeight).catch(() => {});
-          }
-        }}
-      />
+    <div className="video-view" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      {live ? (
+        <video
+          ref={ref}
+          src={asset.url}
+          poster={thumbUrl(asset.url)}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          onLoadedMetadata={(e) => {
+            const v = e.currentTarget;
+            const duration = Math.round(v.duration * 10) / 10;
+            const sized = v.videoWidth && v.videoHeight && (v.videoWidth !== asset.width || v.videoHeight !== asset.height);
+            if (!sized && (!Number.isFinite(duration) || duration === asset.duration)) return;
+            // Remembered on the item, so the badge shows without loading the video next time.
+            const fixed = { ...asset, ...(sized ? { width: v.videoWidth, height: v.videoHeight } : {}), ...(Number.isFinite(duration) ? { duration } : {}) };
+            patchItem(item.id, { asset: fixed, ...(sized ? { h: Math.round(item.w * (v.videoHeight / v.videoWidth)) } : {}) });
+            if (sized) void api.setAssetSize(asset.id, v.videoWidth, v.videoHeight).catch(() => {});
+          }}
+        />
+      ) : (
+        <img src={thumbUrl(asset.url)} alt={item.name ?? ''} draggable={false} decoding="async" />
+      )}
       <div className="video-badge">
         {item.request?.op === 'video.generate' && <Volume2 />}
-        {duration ? `${duration.toFixed(1)}s` : '视频'}
+        {asset.duration ? `${asset.duration.toFixed(1)}s` : '视频'}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -139,7 +168,7 @@ function NoteView({ item }: { item: CanvasItem }) {
   );
 }
 
-export const ItemView = memo(function ItemView({ item, task }: { item: CanvasItem; task?: Task }) {
+export const ItemView = memo(function ItemView({ item, task, full = true }: { item: CanvasItem; task?: Task; full?: boolean }) {
   if (item.kind === 'text') {
     return (
       <div className="item item-note" data-item-id={item.id} style={{ transform: `translate(${item.x}px, ${item.y}px)`, width: item.w, height: item.h }}>
@@ -155,9 +184,9 @@ export const ItemView = memo(function ItemView({ item, task }: { item: CanvasIte
     >
       {item.asset ? (
         item.kind === 'image' ? (
-          <img src={item.asset.url} alt={item.name ?? ''} draggable={false} decoding="async" />
+          <ImageView item={item} full={full} />
         ) : (
-          <VideoView item={item} />
+          <VideoView item={item} full={full} />
         )
       ) : (
         <Placeholder item={item} task={task} />

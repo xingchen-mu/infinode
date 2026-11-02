@@ -1,8 +1,10 @@
 import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, FileJson, Loader2, Pencil, Plus, Trash2, Upload, X } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { LICENSES, licenseLabel } from '../../shared/licenses';
 import type { CustomWorkflow, PresetInfo, WorkflowDraft, WorkflowField, WorkflowInput, WorkflowInputType } from '../../shared/types';
 import { loadWorkflows } from '../lib/actions';
 import { type WorkflowData, api } from '../lib/api';
+import { unavailableReason } from '../lib/models';
 import { setComposer, toast, useStore } from '../store';
 
 function Modal({ title, onClose, children, footer, wide }: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
@@ -55,15 +57,35 @@ function SettingsModal() {
   const workflows = useStore((s) => s.workflows);
   const [url, setUrl] = useState('');
   const [saved, setSaved] = useState('');
-  const [busy, setBusy] = useState<'test' | 'save' | null>(null);
+  const [commercial, setCommercial] = useState(false);
+  const [busy, setBusy] = useState<'test' | 'save' | 'license' | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     void api.settings().then((s) => {
       setUrl(s.comfyUrl);
       setSaved(s.comfyUrl);
+      setCommercial(Boolean(s.commercialOnly));
     });
   }, []);
+
+  const switchCommercial = async (on: boolean) => {
+    setBusy('license');
+    setCommercial(on);
+    try {
+      const r = await api.saveSettings({ commercialOnly: on });
+      useStore.setState({ caps: r.capabilities, comfyOnline: r.capabilities.comfyOnline });
+      setCommercial(Boolean(r.settings.commercialOnly));
+      // Research-only Qwen-Image 2.1 is off now: start new images with Z-Image Turbo instead.
+      if (on && useStore.getState().composer.imageModel === 'qwen') setComposer({ imageModel: 'zimage' });
+      toast(on ? '已开启：不能商用的模型已停用' : '已关闭：所有模型都可以用，许可证由你自己负责', 'success');
+    } catch (err) {
+      setCommercial(!on);
+      toast((err as Error).message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const test = async () => {
     setBusy('test');
@@ -132,10 +154,24 @@ function SettingsModal() {
               <div key={key} className="tool-row">
                 {ok ? <CheckCircle2 className="ok" /> : <AlertTriangle className="bad" />}
                 <span className="tool-name">{BUILTIN_NAMES[key]}</span>
-                <span className="tool-state">{!caps?.comfyOnline ? '未连接' : ok ? '可用' : `缺少：${missing?.join('、')}`}</span>
+                <span className={`tool-license ${LICENSES[key]?.use ?? ''}`} title={LICENSES[key] ? `${LICENSES[key].license}：${LICENSES[key].note}` : undefined}>
+                  {licenseLabel(key)}
+                </span>
+                <span className="tool-state">{!caps?.comfyOnline ? '未连接' : ok ? '可用' : unavailableReason(missing ?? [])}</span>
               </div>
             );
           })}
+        </div>
+      </section>
+
+      <section className="m-section">
+        <div className="m-label">商用</div>
+        <label className="m-check">
+          <input type="checkbox" checked={commercial} disabled={busy !== null} onChange={(e) => void switchCommercial(e.target.checked)} />
+          <span>只用可以商用的模型</span>
+        </label>
+        <div className="m-help">
+          打开后，只允许研究用途或不能商用的模型会停用：内置的 Qwen-Image 2.1 生图和基于它的局部重绘、消除、扩图、抠图，以及模板库里的 FLUX.2 [dev] 等。出图默认换成 Z-Image Turbo，改图用模板库里标「可商用」的模板（如 Qwen-Image-Edit 2511）。画布助手和 MCP 也遵守这个设置。标注仅供参考，以各模型页面上的许可证原文为准；你自己导入的工作流不受影响。
         </div>
       </section>
 
@@ -630,6 +666,11 @@ function PresetCard({ p }: { p: PresetInfo }) {
       <div className="tpl-body">
         <div className="tpl-name">{p.name}</div>
         <div className="tpl-desc">{p.description}</div>
+        {LICENSES[`custom:${p.id}`] && (
+          <div className={`tpl-license ${LICENSES[`custom:${p.id}`].use}`} title={`${LICENSES[`custom:${p.id}`].license}：${LICENSES[`custom:${p.id}`].note}`}>
+            {LICENSES[`custom:${p.id}`].model} · {licenseLabel(`custom:${p.id}`)}
+          </div>
+        )}
         <div className="tpl-foot">
           {!online ? (
             <span className="tpl-state">ComfyUI 未连接</span>

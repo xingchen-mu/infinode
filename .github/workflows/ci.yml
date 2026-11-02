@@ -29,6 +29,8 @@ jobs:
       - run: npm ci
       - name: Typecheck and build
         run: npm run build
+      - name: Unit tests
+        run: npm test
       # The server has to start and answer without a ComfyUI to talk to.
       - name: Smoke test
         run: npm run smoke

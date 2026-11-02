@@ -10,6 +10,8 @@ export interface AssetInfo {
   width: number;
   height: number;
   name?: string;
+  /** Videos: seconds, once the page has read it. */
+  duration?: number;
 }
 
 export type ImageModel = 'zimage' | 'qwen';
@@ -226,6 +228,8 @@ export interface PresetInfo extends Omit<CustomWorkflow, 'graph'> {
 
 export interface Settings {
   comfyUrl: string;
+  /** Only models whose license allows commercial use (see shared/licenses.ts); the rest are switched off. */
+  commercialOnly?: boolean;
 }
 
 /** Text items hold notes such as a script or a shot list. */
@@ -320,9 +324,16 @@ export interface AgentStatus {
   reason?: string;
 }
 
+/** Tokens and estimated cost of a board's conversation so far (from the provider's catalog prices). */
+export interface AgentUsage {
+  tokens: number;
+  cost: number;
+}
+
 export interface AgentView {
   entries: AgentEntry[];
   running: boolean;
+  usage: AgentUsage;
 }
 
 /** Sent over /api/events as `agent`. */
@@ -331,6 +342,7 @@ export interface AgentEventData {
   /** Added or changed (matched by id). */
   entry?: AgentEntry;
   running?: boolean;
+  usage?: AgentUsage;
   /** The conversation was cleared. */
   reset?: boolean;
 }

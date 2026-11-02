@@ -46,19 +46,26 @@ export async function probe(path: string): Promise<VideoInfo> {
  */
 export async function soundSpans(path: string, duration: number, threshold = -28): Promise<{ start: number; end: number }[]> {
   const log = (await exec('ffmpeg', ['-hide_banner', '-nostats', '-i', path, '-vn', '-af', `silencedetect=n=${threshold}dB:d=0.25`, '-f', 'null', '-'], undefined, 'stderr')).toString();
+  return spansBetweenSilences(log, duration);
+}
+
+/** The stretches between the silences ffmpeg's silencedetect reported (shorter than 0.15 s dropped). */
+export function spansBetweenSilences(log: string, duration: number): { start: number; end: number }[] {
   const spans: { start: number; end: number }[] = [];
   let soundFrom = 0;
-  for (const m of log.matchAll(/silence_(start|end): ([\d.]+)/g)) {
-    const t = Number(m[2]);
+  let silent = false;
+  for (const m of log.matchAll(/silence_(start|end): (-?[\d.]+)/g)) {
+    const t = Math.max(0, Number(m[2]));
     if (m[1] === 'start') {
       if (t - soundFrom >= 0.15) spans.push({ start: soundFrom, end: t });
-    } else soundFrom = t;
+      silent = true;
+    } else {
+      soundFrom = t;
+      silent = false;
+    }
   }
-  // Sound runs to the end unless the last silence did.
-  const lastStart = [...log.matchAll(/silence_start: ([\d.]+)/g)].at(-1);
-  const lastEnd = [...log.matchAll(/silence_end: ([\d.]+)/g)].at(-1);
-  const openSilence = lastStart && (!lastEnd || Number(lastStart[1]) > Number(lastEnd[1]));
-  if (!openSilence && duration - soundFrom >= 0.15) spans.push({ start: soundFrom, end: duration });
+  // Sound runs to the end unless a silence did.
+  if (!silent && duration - soundFrom >= 0.15) spans.push({ start: soundFrom, end: duration });
   return spans.map((s) => ({ start: Math.round(s.start * 100) / 100, end: Math.round(Math.min(s.end, duration) * 100) / 100 }));
 }
 

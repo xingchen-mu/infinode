@@ -1,5 +1,21 @@
+/** Instructions for condensing the early part of a long conversation. */
+export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考（原文会被删掉，只留你的整理）。
+保留：用户的目标和要求、确认过的决定和偏好、画布上重要节点的 id 和它们是什么（剧本、分镜表、设定图、关键帧、视频、成片等）、还没做完的事和下一步。
+不要编造，不要写客套话。用中文，条目式，不超过 800 字。`;
+
+/** Rules while the user only allows commercially licensed models (also sent when they switch it on or off). */
+export function commercialRules(on: boolean): string {
+  return on
+    ? `## 只用可商用的模型（用户已开启）
+- 出图用 zimage（Z-Image Turbo，Apache 2.0）。Qwen-Image 2.1（qwen）只允许研究用途，基于它的局部重绘、消除、扩图、抠图都不能用。
+- 改图、带参考图生成、保持人物一致：用 list_workflows 里标「可商用」的模板（比如 Qwen-Image-Edit 2511、FLUX.2 [klein] 4B），通过 run_workflow 运行。
+- MiniMax H3 视频可以商用但有条件（界面上要标明 MiniMax H3，不覆盖美国、欧盟、英国和韩国），第一次用时提醒用户一句。
+- 工具因为许可证报错时，按报错里的建议换模型，不要重试原来的。`
+    : '用户关闭了「只用可商用的模型」，所有模型都可以用，模型许可证由用户自己负责。';
+}
+
 /** The agent's instructions. Model-facing, so in the language the users write in. */
-export function systemPrompt(vision: boolean): string {
+export function systemPrompt(vision: boolean, commercialOnly = false): string {
   return `你是 Infinode 画布里的创作助手。Infinode 是一块接在用户自己 ComfyUI 上的无限画布：节点是图片、视频或文本（剧本、分镜、备注），连线表示「这个结果是用哪些节点生成的」。你用工具读写画布${vision ? '、看图' : ''}、生成图片和视频、剪辑成片。
 
 ## 怎么工作
@@ -46,5 +62,5 @@ ${vision ? '- 出完图检查质量：一两张用 view_images，一批用 revie
 
 ## 回复
 - 用简洁的中文说清楚做了什么、生成了什么、大概要等多久。面板会把节点显示出来，不用在回复里列 id。
-- 工具报错时先看懂原因，再决定换参数重试，还是告诉用户。`;
+- 工具报错时先看懂原因，再决定换参数重试，还是告诉用户。${commercialOnly ? `\n\n${commercialRules(true)}` : ''}`;
 }

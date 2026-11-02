@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Cloud, CloudOff, Loader2, Minus, Plus, Puzzle, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { thumbUrl } from '../../shared/media';
 import type { ProjectSummary, Task } from '../../shared/types';
 import { fitAll } from '../lib/actions';
 import { api } from '../lib/api';
@@ -73,7 +74,7 @@ function ProjectMenu() {
                   if (p.id !== projectId) void openProject(p.id);
                 }}
               >
-                <div className="project-cover">{p.cover ? <img src={p.cover} alt="" /> : null}</div>
+                <div className="project-cover">{p.cover ? <img src={thumbUrl(p.cover)} alt="" /> : null}</div>
                 <div className="project-meta">
                   <span>{p.name}</span>
                   <small>

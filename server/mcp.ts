@@ -25,6 +25,7 @@ const INSTRUCTIONS = `Infinode is an infinite canvas on the user's own ComfyUI. 
 - Generation is asynchronous: generate_* / batch_* / run_workflow return new item ids at once; use wait_for_items to get results (each wait is capped, call again if it times out).
 - One GPU runs everything in turn: an image takes about 30–60 s, a MiniMax H3 video 5–14 min per clip. Ask the user before queueing several videos.
 - New items are placed and linked on the board automatically; the user watches the board update live.
+- If the user switched on commercial-only mode, tools refuse research-only and non-commercial models and say what to use instead; list_workflows marks each template's license.
 - Tool descriptions are in Chinese, the language of the app; reply in the user's language.`;
 
 const BOARD_ID = { type: 'string', description: '画布 id；不传就用用户在页面上正在看的画布（见 get_context）' };

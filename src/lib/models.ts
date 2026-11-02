@@ -1,4 +1,10 @@
+import { COMMERCIAL_BLOCK } from '../../shared/licenses';
 import type { ImageModel, VideoModel } from '../../shared/types';
+
+/** Why a tool cannot run, for menus and tooltips: a license block reads differently from a missing model. */
+export function unavailableReason(missing: string[]): string {
+  return missing.find((m) => m.startsWith(COMMERCIAL_BLOCK)) ?? `缺少：${missing.join('、')}`;
+}
 
 export interface ModelOption<T extends string> {
   id: T;

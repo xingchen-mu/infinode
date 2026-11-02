@@ -1,7 +1,8 @@
 import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, Square, SquarePen, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
-import type { AgentEntry, AgentEventData, AgentStatus } from '../../shared/types';
+import { thumbUrl } from '../../shared/media';
+import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage } from '../../shared/types';
 import { ensureVisible, revealItems } from '../lib/actions';
 import { api } from '../lib/api';
 import { boundsOf, viewportCenter } from '../lib/geometry';
@@ -23,6 +24,7 @@ interface AgentState {
   projectId: string | null;
   entries: AgentEntry[];
   running: boolean;
+  usage: AgentUsage;
   draft: string;
 }
 
@@ -32,6 +34,7 @@ export const useAgent = create<AgentState>(() => ({
   projectId: null,
   entries: [],
   running: false,
+  usage: { tokens: 0, cost: 0 },
   draft: '',
 }));
 
@@ -54,9 +57,9 @@ export async function refreshAgent() {
   try {
     const [status, view] = await Promise.all([api.agentStatus(), api.agent(projectId)]);
     if (useStore.getState().projectId !== projectId) return;
-    useAgent.setState({ status, projectId, entries: view.entries, running: view.running });
+    useAgent.setState({ status, projectId, entries: view.entries, running: view.running, usage: view.usage });
   } catch (err) {
-    useAgent.setState({ status: { ready: false, model: '', vision: false, reason: (err as Error).message }, projectId, entries: [], running: false });
+    useAgent.setState({ status: { ready: false, model: '', vision: false, reason: (err as Error).message }, projectId, entries: [], running: false, usage: { tokens: 0, cost: 0 } });
   }
 }
 
@@ -64,11 +67,12 @@ export function onAgentEvent(e: AgentEventData) {
   const s = useAgent.getState();
   if (e.projectId !== s.projectId) return;
   if (e.reset) {
-    useAgent.setState({ entries: [], running: false });
+    useAgent.setState({ entries: [], running: false, usage: { tokens: 0, cost: 0 } });
     return;
   }
   const patch: Partial<AgentState> = {};
   if (e.running !== undefined) patch.running = e.running;
+  if (e.usage) patch.usage = e.usage;
   const entry = e.entry;
   if (entry) {
     const i = s.entries.findIndex((x) => x.id === entry.id);
@@ -120,11 +124,7 @@ function ItemChip({ id }: { id: string }) {
   return (
     <button className="agent-chip" title={item.name ?? '在画布上查看'} onClick={() => focusItems([id])}>
       {media ? (
-        media.kind === 'video' ? (
-          <video src={`${media.url}#t=0.1`} muted preload="metadata" />
-        ) : (
-          <img src={media.url} alt="" />
-        )
+        <img src={thumbUrl(media.url)} alt="" />
       ) : item.error ? (
         <CircleAlert className="bad" />
       ) : (
@@ -242,8 +242,14 @@ export function AgentButton() {
   );
 }
 
+/** "1.2 万 tokens · $0.003" */
+function usageText(u: AgentUsage): string {
+  const tokens = u.tokens >= 10_000 ? `${(u.tokens / 10_000).toFixed(1)} 万` : String(u.tokens);
+  return `${tokens} tokens${u.cost > 0 ? ` · $${u.cost.toFixed(u.cost < 0.1 ? 3 : 2)}` : ''}`;
+}
+
 export function AgentPanel() {
-  const { open, status, entries, running, draft } = useAgent();
+  const { open, status, entries, running, usage, draft } = useAgent();
   const projectId = useStore((s) => s.projectId);
   const selected = useStore((s) => s.selection.length);
   const log = useRef<HTMLDivElement>(null);
@@ -271,6 +277,11 @@ export function AgentPanel() {
         <span className="agent-title">画布助手</span>
         {status?.model && <span className="agent-model">{status.model.split('/').pop()}</span>}
         <span className="agent-head-gap" />
+        {usage.tokens > 0 && (
+          <span className="agent-usage" title="这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）">
+            {usageText(usage)}
+          </span>
+        )}
         <button className="icon-btn small" title="新对话" onClick={() => void clear()} disabled={!entries.length}>
           <SquarePen />
         </button>

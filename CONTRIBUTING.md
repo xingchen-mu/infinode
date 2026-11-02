@@ -10,6 +10,7 @@
 npm install
 npm run dev          # 前端 http://localhost:5173 + 后端 http://127.0.0.1:8787
 npm run typecheck    # 提交前请确保没有类型错误
+npm test             # 单元测试：合并、布局、工作流映射、许可证，以及用 pi 的假模型跑画布助手（不需要 ComfyUI 和 API key）
 npm run build && npm run smoke   # 和 CI 一样：构建，再检查后端在没有 ComfyUI 时能否正常启动
 ```
 
@@ -57,4 +58,4 @@ npm run test:wf -- '{"op":"image.generate","model":"zimage","prompt":"a cat","as
 
 ---
 
-**English summary:** Issues and PRs are welcome. Run `npm run typecheck` before submitting; CI runs typecheck, build and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit, and you agree that it is released under this project's license and may also be included in the commercial licenses the maintainers grant (a perpetual, worldwide, royalty-free, non-exclusive grant).
+**English summary:** Issues and PRs are welcome. Run `npm run typecheck` and `npm test` before submitting; CI runs typecheck, build, the unit tests (including the canvas assistant on pi's faux model) and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit, and you agree that it is released under this project's license and may also be included in the commercial licenses the maintainers grant (a perpetual, worldwide, royalty-free, non-exclusive grant).

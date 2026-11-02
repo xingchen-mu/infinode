@@ -1,8 +1,10 @@
 import { ArrowUp, Clapperboard, Clock, Copy, Image as ImageIcon, Layers, Loader2, Ratio, SlidersHorizontal, Sparkle, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { COMMERCIAL_BLOCK, licenseLabel } from '../../shared/licenses';
+import { thumbUrl } from '../../shared/media';
 import type { WorkflowInput, WorkflowLike } from '../../shared/types';
 import { activeWorkflow, composerReferences, generateFromComposer, promptOptional } from '../lib/actions';
-import { IMAGE_ASPECTS, IMAGE_MODELS, VIDEO_ASPECTS, VIDEO_DURATIONS, VIDEO_MODELS } from '../lib/models';
+import { IMAGE_ASPECTS, IMAGE_MODELS, VIDEO_ASPECTS, VIDEO_DURATIONS, VIDEO_MODELS, unavailableReason } from '../lib/models';
 import { select, setComposer, useStore } from '../store';
 import { Dropdown, type DropdownOption } from './Dropdown';
 
@@ -179,11 +181,14 @@ export function Composer() {
   const kind = isImage ? 'image' : 'video';
   const builtins: DropdownOption<string>[] = (isImage ? IMAGE_MODELS : VIDEO_MODELS).map((m) => {
     const miss = caps?.features[m.feature];
+    const license = licenseLabel(m.feature);
+    // A license block holds whether or not ComfyUI is reachable.
+    const blocked = miss?.find((x) => x.startsWith(COMMERCIAL_BLOCK));
     return {
       value: m.id,
       label: m.name,
-      desc: miss?.length && caps?.comfyOnline ? `缺少：${miss.join('、')}` : m.desc,
-      disabled: Boolean(caps?.comfyOnline && miss?.length),
+      desc: blocked ?? (miss?.length && caps?.comfyOnline ? unavailableReason(miss) : `${m.desc}${license ? ` · ${license}` : ''}`),
+      disabled: Boolean(blocked || (caps?.comfyOnline && miss?.length)),
       section: '内置',
     };
   });
@@ -195,14 +200,17 @@ export function Composer() {
       return {
         value: `custom:${w.id}`,
         label: w.name,
-        desc: miss?.length && caps?.comfyOnline ? `缺少：${miss.join('、')}` : (w.description ?? (slots ? `需要 ${slots} 个输入素材` : '文生') + ' · 我导入的工作流'),
+        desc: miss?.length && caps?.comfyOnline ? unavailableReason(miss) : (w.description ?? (slots ? `需要 ${slots} 个输入素材` : '文生') + ' · 我导入的工作流'),
         section: '我的工作流',
       };
     });
   // Presets this ComfyUI can run; the rest live in the template gallery.
   const ready: DropdownOption<string>[] = presets
     .filter((p) => p.kind === kind && caps?.comfyOnline && !(caps.features[`custom:${p.id}`]?.length))
-    .map((p) => ({ value: `custom:${p.id}`, label: p.name, desc: p.description, section: '官方模板' }));
+    .map((p) => {
+      const license = licenseLabel(`custom:${p.id}`);
+      return { value: `custom:${p.id}`, label: p.name, desc: [p.description, license].filter(Boolean).join(' · '), section: '官方模板' };
+    });
   const modelOptions: DropdownOption<string>[] = [
     ...builtins,
     { value: BROWSE, label: `浏览模板库（${presets.length} 个官方模板）…`, action: true, section: '官方模板' },
@@ -257,7 +265,7 @@ export function Composer() {
           {[...refs, ...videos].map((r, i) => (
             <div key={r.id} className="ref" title={!wf && (isImage || composer.videoModel === 'minimax-ref') ? `点击插入 @图${i + 1}` : refLabel(i)}>
               <button className="ref-thumb" onClick={() => !wf && insertRef(i + 1)}>
-                {r.kind === 'video' ? <video src={r.asset!.url} muted /> : <img src={r.asset!.url} alt="" />}
+                <img src={thumbUrl(r.asset!.url)} alt="" />
                 <span className="ref-label">{r.kind === 'video' ? '视频' : refLabel(i)}</span>
               </button>
               <button className="ref-x" title="不使用这个" onClick={() => select([r.id], 'toggle')}>

@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
+import { licenseLabel } from '../../shared/licenses.ts';
 import type { CanvasItem, ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
 import { GAP, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
 import { publicAsset } from '../assets.ts';
@@ -18,6 +19,7 @@ import {
   readBoard,
   stateOf,
 } from './board.ts';
+import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
 import { concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
@@ -83,9 +85,6 @@ const clip = (s: string, max = 40) => (s.length > max ? `${s.slice(0, max)}…` 
 
 const VIDEO_DURATIONS = [3, 5, 8, 10];
 const snapDuration = (s: number | undefined) => VIDEO_DURATIONS.reduce((best, d) => (Math.abs(d - (Number(s) || 5)) < Math.abs(best - (Number(s) || 5)) ? d : best));
-/** MiniMax H3 on the reference GPU: seconds of GPU per second of video, plus loading the model once. */
-const H3_COST = { '480p': 30, '720p': 66 } as const;
-const H3_WARMUP = 600;
 const MAX_BATCH = 40;
 const MAX_LISTED = 300;
 const VIEWABLE = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -136,6 +135,14 @@ export type ToolHost = 'panel' | 'mcp';
 
 export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHost = 'panel'): CanvasTool[] {
   const afterBatch = host === 'panel' ? '这一批全部结束时你会自动收到一条通知，不用 wait_for_items。' : '用 wait_for_items 等结果（单次等待有上限，超时就再调用一次）。';
+
+  const commercial = () => Boolean(deps.commercialOnly?.());
+  /** Qwen-Image 2.1 unless asked otherwise, or Z-Image when only commercially licensed models may run. */
+  const imageModel = (asked?: ImageModel): ImageModel => (asked === 'zimage' || asked === 'qwen' ? asked : commercial() ? 'zimage' : 'qwen');
+  const noReferences = () =>
+    commercial()
+      ? 'zimage 不支持参考图；用户开启了「只用可商用的模型」，Qwen-Image 2.1 也不能用。改图请用 list_workflows 里可商用的模板（如 Qwen-Image-Edit 2511），通过 run_workflow 运行'
+      : 'zimage 不支持参考图，要用参考图请用 qwen';
 
   const launchVideos = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
     const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
@@ -244,9 +251,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       },
       describe: (a) => clip(a.prompt ?? ''),
       async run(args, ctx) {
-        const model: ImageModel = args.model === 'zimage' ? 'zimage' : 'qwen';
+        const model = imageModel(args.model);
         const refIds = args.reference_ids ?? [];
-        if (model === 'zimage' && refIds.length) throw new Error('zimage 不支持参考图，要用参考图请用 qwen');
+        if (model === 'zimage' && refIds.length) throw new Error(noReferences());
         if (refIds.length > 10) throw new Error('参考图最多 10 张');
         const p = await readBoard(deps, ctx.projectId);
         const refs = findItems(p, refIds);
@@ -263,7 +270,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const { items, error } = await launch(deps, writer, ctx.projectId, { request, count, inputs: refs, name: args.name, view: ctx.view });
         const made = items.map((i) => `\`${i.id}\``).join(' ');
         return {
-          text: `已提交 ${items.length} 张，新节点：${made}。每张约 30–60 秒（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 张提交失败：${error}` : ''}`,
+          text: `已提交 ${items.length} 张，新节点：${made}。每张${roughly(imageEstimate(deps.tasks.list(), request))}（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 张提交失败：${error}` : ''}`,
           summary: `${items.length} 张已提交`,
           items: items.map((i) => i.id),
         };
@@ -315,7 +322,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const count = Math.min(2, Math.max(1, Math.round(args.count ?? 1)));
         const { items, error } = await launch(deps, writer, ctx.projectId, { request, count, inputs: frames, name: args.name, view: ctx.view });
         return {
-          text: `已提交 ${items.length} 段 ${duration} 秒视频，新节点：${items.map((i) => `\`${i.id}\``).join(' ')}。每段要 10 分钟以上。${error ? `另有 ${count - items.length} 段提交失败：${error}` : ''}`,
+          text: `已提交 ${items.length} 段 ${duration} 秒视频，新节点：${items.map((i) => `\`${i.id}\``).join(' ')}。预计 GPU ${roughly(videoEstimate(deps.tasks.list(), request.quality, items.map(() => duration)).seconds)}（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 段提交失败：${error}` : ''}`,
           summary: `${items.length} 段已提交（${duration} 秒）`,
           items: items.map((i) => i.id),
         };
@@ -333,13 +340,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const caps = await deps.capabilities();
         const all = deps.workflows();
         const ready = all.filter((w) => !caps.features[`custom:${w.id}`]?.length && !w.inputs.some((i) => i.type === 'mask'));
-        const lines = ready.map(
-          (w) =>
-            `- \`${w.id}\`「${w.name}」输出${w.kind === 'video' ? '视频' : '图片'}${w.description ? ` · ${clip(w.description, 80)}` : ''}\n  输入：${inputsLine(w)}`,
-        );
+        const lines = ready.map((w) => {
+          const license = licenseLabel(`custom:${w.id}`);
+          return `- \`${w.id}\`「${w.name}」输出${w.kind === 'video' ? '视频' : '图片'}${license ? ` · ${license}` : ''}${w.description ? ` · ${clip(w.description, 80)}` : ''}\n  输入：${inputsLine(w)}`;
+        });
         const blocked = all.length - ready.length;
         return {
-          text: (ready.length ? `能用的工作流 ${ready.length} 个：\n${lines.join('\n')}` : '没有能用的工作流') + (blocked ? `\n另有 ${blocked} 个缺模型、缺节点或需要蒙版，暂时不能用` : ''),
+          text: (ready.length ? `能用的工作流 ${ready.length} 个：\n${lines.join('\n')}` : '没有能用的工作流') + (blocked ? `\n另有 ${blocked} 个缺模型、缺节点、需要蒙版或不可商用，暂时不能用` : ''),
           summary: `${ready.length} 个可用`,
         };
       },
@@ -556,12 +563,12 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       },
       describe: (a) => `${a.jobs?.length ?? 0} 张`,
       async run(args, ctx) {
-        const model: ImageModel = args.model === 'zimage' ? 'zimage' : 'qwen';
+        const model = imageModel(args.model);
         const p = await readBoard(deps, ctx.projectId);
         // Check every job before queueing any, so a bad id does not leave half a batch.
         const jobs: BatchJob[] = args.jobs.slice(0, MAX_BATCH).map((j, n) => {
           const refIds = j.reference_ids ?? [];
-          if (model === 'zimage' && refIds.length) throw new Error(`第 ${n + 1} 张：zimage 不支持参考图`);
+          if (model === 'zimage' && refIds.length) throw new Error(`第 ${n + 1} 张：${noReferences()}`);
           const refs = findItems(p, refIds.slice(0, 10));
           const media = inputMedia(deps, refs, 'image');
           return {
@@ -631,7 +638,8 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           return { prompt: j.prompt, frames: frames.map((f) => f.id), duration: snapDuration(j.duration), name: j.name ?? null };
         });
         const seconds = jobs.reduce((n, j) => n + j.duration, 0);
-        const minutes = Math.ceil((seconds * H3_COST[quality] + H3_WARMUP) / 60);
+        const estimate = videoEstimate(deps.tasks.list(), quality, jobs.map((j) => j.duration));
+        const minutes = Math.max(1, Math.round(estimate.seconds / 60));
         if (host === 'mcp') {
           const out = await launchVideos({ quality, jobs }, ctx);
           return { ...out, text: `${out.text}\n预计 GPU 约 ${minutes} 分钟（共 ${seconds} 秒、${quality}）。` };
@@ -641,7 +649,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           summary: '等待确认',
           approval: {
             title: `生成 ${jobs.length} 段视频`,
-            detail: `共 ${seconds} 秒 · ${quality} · 预计 GPU 约 ${minutes} 分钟（期间其他生成任务要排队）`,
+            detail: `共 ${seconds} 秒 · ${quality} · 预计 GPU 约 ${minutes} 分钟（${estimate.measured ? '按这台服务器以往的速度' : '按参考显卡的速度'}估算，期间其他生成任务要排队）`,
             payload: { quality, jobs },
           },
         };

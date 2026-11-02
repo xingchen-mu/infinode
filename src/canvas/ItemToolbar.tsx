@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { CanvasItem, WorkflowLike } from '../../shared/types';
 import { captureFrame, download, promptOptional, regenerate, removeBackground, runWorkflow, upscale } from '../lib/actions';
 import { toScreen } from '../lib/geometry';
+import { unavailableReason } from '../lib/models';
 import { removeItems, select, setComposer, toast, useStore } from '../store';
 
 function useFeature(key: string): { ok: boolean; why?: string } {
@@ -10,7 +11,9 @@ function useFeature(key: string): { ok: boolean; why?: string } {
   const missing = caps?.features[key];
   if (!caps || !missing) return { ok: true };
   if (!caps.comfyOnline) return { ok: false, why: 'ComfyUI 未连接' };
-  return missing.length ? { ok: false, why: `服务器缺少：${missing.join('、')}` } : { ok: true };
+  if (!missing.length) return { ok: true };
+  const reason = unavailableReason(missing);
+  return { ok: false, why: reason.startsWith('缺少') ? `服务器${reason}` : `${reason}（可在设置里关闭「只用可商用的模型」）` };
 }
 
 function Btn(props: { icon: React.ReactNode; label?: string; title: string; onClick: () => void; feature?: string; danger?: boolean }) {

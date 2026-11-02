@@ -66,6 +66,12 @@ export function placeRow(items: CanvasItem[], start: { x: number; y: number }, s
   return sizes.map((_, i) => ({ x: start.x + i * 40, y: start.y + i * 40 }));
 }
 
+/** The board area on screen, grown on every side by `margin` (a fraction of the screen). */
+export function visibleRect(v: Viewport, width: number, height: number, margin = 0): Rect {
+  const topLeft = toWorld(v, -width * margin, -height * margin);
+  return { x: topLeft.x, y: topLeft.y, w: (width * (1 + 2 * margin)) / v.zoom, h: (height * (1 + 2 * margin)) / v.zoom };
+}
+
 export function viewportCenter(v: Viewport, width: number, height: number) {
   return toWorld(v, width / 2, height / 2);
 }

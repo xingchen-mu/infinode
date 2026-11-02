@@ -10,6 +10,8 @@ import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { AgentEventData, Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
 import { AgentHub } from './agent/runtime.ts';
+import { COMMERCIAL_BLOCK, LICENSES, commercialBlock } from '../shared/licenses.ts';
+import { allowedHost, hostName } from './hosts.ts';
 import { CanvasMcp, type Presence } from './mcp.ts';
 import { AssetStore, mimeFor, publicAsset } from './assets.ts';
 import { ComfyClient, ComfyError } from './comfy.ts';
@@ -18,6 +20,7 @@ import { PresetStore } from './presets.ts';
 import { ProjectConflict, ProjectStore, type ItemsPatch } from './projects.ts';
 import { SettingsStore, normalizeComfyUrl } from './settings.ts';
 import { TaskManager } from './tasks.ts';
+import { ThumbStore } from './thumbs.ts';
 import { WorkflowStore } from './workflowStore.ts';
 import type { WorkflowIssue } from '../shared/types.ts';
 import {
@@ -30,7 +33,7 @@ import {
   parseWorkflowJson,
   validateGraph,
 } from './workflows/custom.ts';
-import { REQUIREMENTS, RequestError } from './workflows/index.ts';
+import { REQUIREMENTS, RequestError, featureKey } from './workflows/index.ts';
 import { missingFor, resolveModels } from './workflows/models.ts';
 
 async function stableClientId() {
@@ -53,13 +56,14 @@ const assets = new AssetStore();
 const projects = new ProjectStore();
 const workflows = new WorkflowStore();
 const presets = new PresetStore();
+const thumbs = new ThumbStore();
 const tasks = new TaskManager(
   comfy,
   assets,
   (id) => workflows.get(id) ?? presets.get(id),
   () => (capsCache?.value.comfyUrl === comfy.baseUrl ? capsCache.info : undefined),
 );
-await Promise.all([assets.init(), projects.init(), workflows.init(), presets.init(), tasks.init()]);
+await Promise.all([assets.init(), projects.init(), workflows.init(), presets.init(), tasks.init(), thumbs.init()]);
 
 const comfyStatus = EventTargetLike<boolean>();
 /** Board changes, so open pages can merge edits made elsewhere (another tab, a script, an agent). */
@@ -76,6 +80,7 @@ const canvasDeps = {
   workflows: () => [...workflows.list(), ...presets.list()],
   capabilities: () => capabilities(),
   changed: (p: Project) => projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: 'agent' }),
+  commercialOnly: () => Boolean(settings.value.commercialOnly),
 };
 const agent = new AgentHub(canvasDeps, (e) => agentEvents.emit(e));
 const mcp = new CanvasMcp(canvasDeps, () => presence, (projectId, ids) => revealEvents.emit({ projectId, ids }), process.env.npm_package_version ?? 'dev');
@@ -123,7 +128,7 @@ async function capabilities(force = false): Promise<Capabilities> {
       comfyUrl: comfy.baseUrl,
       comfyVersion: stats.system.comfyui_version,
       gpu: stats.devices[0]?.name?.replace(/^cuda:\d+\s*/, '').replace(/\s*:\s*cudaMallocAsync$/, ''),
-      features,
+      features: licensed(features),
       models: Object.fromEntries(Object.entries(models).filter(([, v]) => v)) as Record<string, string>,
     };
     capsCache = { at: Date.now(), value, info };
@@ -132,10 +137,21 @@ async function capabilities(force = false): Promise<Capabilities> {
     return {
       comfyOnline: false,
       comfyUrl: comfy.baseUrl,
-      features: capsCache?.value.features ?? {},
+      features: licensed(capsCache?.value.features ?? {}),
       models: capsCache?.value.models ?? {},
     };
   }
+}
+
+/** Commercial-only mode switches off research-only and non-commercial models, like a missing requirement. */
+function licensed(features: Capabilities['features']): Capabilities['features'] {
+  if (!settings.value.commercialOnly) return features;
+  const out = { ...features };
+  for (const key of Object.keys(LICENSES)) {
+    const block = commercialBlock(key);
+    if (block && !out[key]?.includes(block)) out[key] = [...(out[key] ?? []), block];
+  }
+  return out;
 }
 
 /** /object_info when ComfyUI is reachable (used to type and check imported workflows). */
@@ -147,6 +163,13 @@ async function objectInfo(): Promise<ObjectInfo | undefined> {
 // ------------------------------------------------------------------ app
 
 const app = new Hono();
+
+// Pages on other domains must not reach this API by rebinding their domain to 127.0.0.1 (DNS rebinding).
+app.use('*', async (c, next) => {
+  const host = c.req.header('host');
+  if (allowedHost(host, config.allowedHosts, !/^(127\.|::1$|localhost$)/.test(config.host))) return next();
+  return c.json({ error: `不接受来自 ${hostName(host) || '未知地址'} 的访问：请用 localhost 或 IP 地址打开，或把这个域名加进 .env 的 ALLOWED_HOSTS` }, 403);
+});
 
 app.onError((err, c) => {
   const status = err instanceof RequestError || err instanceof WorkflowFormatError ? 400 : err instanceof ComfyError ? 502 : 500;
@@ -179,7 +202,11 @@ app.post('/api/settings/test', async (c) => {
 });
 
 app.put('/api/settings', async (c) => {
-  const body = await c.req.json<{ comfyUrl?: string }>();
+  const body = await c.req.json<{ comfyUrl?: string; commercialOnly?: boolean }>();
+  if (typeof body.commercialOnly === 'boolean' && body.commercialOnly !== Boolean(settings.value.commercialOnly)) {
+    await settings.save({ commercialOnly: body.commercialOnly });
+    capsCache = undefined;
+  }
   if (body.comfyUrl !== undefined) {
     let url: string;
     try {
@@ -204,7 +231,7 @@ app.get('/api/presets', async (c) => {
   const list: PresetInfo[] = presets.list().map(({ graph, ...p }) => {
     const issues = info ? graphIssues(graph, info) : [];
     const missingFiles = [...new Set(issues.filter((i) => i.type === 'file').map((i) => i.value!))];
-    const blocked = capsCache?.value.features[`custom:${p.id}`]?.filter((m) => m.startsWith('fp8')) ?? [];
+    const blocked = capsCache?.value.features[`custom:${p.id}`]?.filter((m) => m.startsWith('fp8') || m.startsWith(COMMERCIAL_BLOCK)) ?? [];
     return {
       ...p,
       missing: {
@@ -331,6 +358,22 @@ app.post('/api/assets/:id/size', async (c) => {
   return c.json({ ok: true });
 });
 
+// Small WebP versions for the board (a frame for videos), so a big board does not load every original.
+app.get('/files/thumb/:file', async (c) => {
+  const name = c.req.param('file');
+  const mime = /^[\w-]+\.\w+$/.test(name) ? mimeFor(name) : undefined;
+  if (!mime) return c.notFound();
+  const source = `${assets.dir}/${name}`;
+  try {
+    await stat(source);
+    const data = await readFile(await thumbs.get(name, source, mime.startsWith('video/')));
+    return c.body(new Uint8Array(data), 200, { 'Content-Type': 'image/webp', 'Cache-Control': 'public, max-age=31536000, immutable' });
+  } catch {
+    // Missing file, or a video frame without ffmpeg: the page falls back to the original.
+    return c.notFound();
+  }
+});
+
 // Asset files, with Range support so videos can seek.
 app.get('/files/:file', async (c) => {
   const name = c.req.param('file');
@@ -370,6 +413,8 @@ app.post('/api/tasks', async (c) => {
   const body = await c.req.json<{ request: TaskRequest; id?: string }>();
   const req = body?.request;
   if (!req || typeof req.op !== 'string') throw new RequestError('请求格式错误');
+  const block = settings.value.commercialOnly ? commercialBlock(featureKey(req)) : undefined;
+  if (block) throw new RequestError(`已开启「只用可商用的模型」：${block.slice(COMMERCIAL_BLOCK.length)}`);
   await capabilities(); // keeps the built-in tools' model picks current
   return c.json(await tasks.create(req, body.id));
 });

@@ -19,11 +19,11 @@ import {
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import type { AgentEntry, AgentEventData, AgentStatus, AgentView, CanvasItem, Task } from '../../shared/types.ts';
+import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage, AgentView, CanvasItem, Task } from '../../shared/types.ts';
 import { config } from '../config.ts';
 import { RequestError } from '../workflows/index.ts';
 import { type CanvasDeps, ResultWriter, describeItem, readBoard } from './board.ts';
-import { systemPrompt } from './prompt.ts';
+import { SUMMARY_PROMPT, commercialRules, systemPrompt } from './prompt.ts';
 import { type CanvasTool, type Json, type ToolContext, canvasTools } from './tools.ts';
 
 const DEFAULT_MODEL = 'deepseek/deepseek-flash';
@@ -33,6 +33,10 @@ const ID = /^[\w-]{6,32}$/;
 const CONTEXT = /^<canvas_context(?: selection="([^"]*)")?>[\s\S]*?<\/canvas_context>\n*/;
 /** Something that happened without the user typing it (tasks finished, an approval); first line is for the panel. */
 const EVENT = /^<canvas_event>([\s\S]*)<\/canvas_event>$/;
+/** The condensed early part of a long conversation. */
+const SUMMARY = /^<canvas_summary>[\s\S]*<\/canvas_summary>$/;
+/** User turns (typed or events) kept word for word when a long conversation is condensed. */
+const KEEP_TURNS = 4;
 /** Runs started by finished tasks in a row, before it waits for the user. */
 const MAX_AUTO_RUNS = 40;
 const IMAGE_DROPPED = '[这张图片已从上下文中移除，需要时用 view_images 重新查看]';
@@ -54,13 +58,19 @@ interface Session {
   /** Streaming text waiting to be pushed (batched, so a fast model does not flood the event stream). */
   textTimer?: NodeJS.Timeout;
   pendingText?: AgentEntry;
-  /** Batches the agent asked to hear about when they finish. */
-  watches: Watch[];
+  /** Tokens and estimated cost so far. */
+  usage: AgentUsage;
+  /** Panel rows of the part of the conversation that was condensed into a summary. */
+  archived: AgentEntry[];
   /** Runs started by finished tasks since the user last wrote. */
   autoRuns: number;
+  /** The commercial-only setting the model was last told about. */
+  commercial: boolean;
 }
 
+/** A batch the agent asked to hear about when it finishes (kept on disk, so a restart does not lose it). */
 interface Watch {
+  projectId: string;
   what: string;
   items: { id: string; name?: string; taskId: string }[];
 }
@@ -121,10 +131,37 @@ async function latestImagesOnly(messages: AgentMessage[]): Promise<AgentMessage[
   return messages.map((m, i) => (i === keep ? m : withoutImages(m)));
 }
 
+function usageOf(messages: AgentMessage[]): AgentUsage {
+  const usage = { tokens: 0, cost: 0 };
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    usage.tokens += m.usage?.totalTokens ?? 0;
+    usage.cost += m.usage?.cost?.total ?? 0;
+  }
+  return usage;
+}
+
+/** The early conversation as plain text for the summary (long parts clipped). */
+function transcriptText(messages: AgentMessage[]): string {
+  const lines: string[] = [];
+  for (const m of messages) {
+    if (m.role === 'user') lines.push(`【用户】${clip(textOf(m.content), 2000)}`);
+    else if (m.role === 'toolResult') lines.push(`【结果】${clip(textOf(m.content), 800)}`);
+    else if (m.role === 'assistant') {
+      for (const c of m.content) {
+        if (c.type === 'text' && c.text.trim()) lines.push(`【助手】${clip(c.text.trim(), 2000)}`);
+        if (c.type === 'toolCall') lines.push(`【调用 ${c.name}】${clip(JSON.stringify(c.arguments), 600)}`);
+      }
+    }
+  }
+  return clip(lines.join('\n'), 120_000);
+}
+
 function userEntry(m: UserMessage): AgentEntry {
   const raw = textOf(m.content);
   const event = EVENT.exec(raw.trim());
   if (event) return { kind: 'event', id: `u${m.timestamp}`, text: event[1].trim().split('\n')[0], at: m.timestamp };
+  if (SUMMARY.test(raw.trim())) return { kind: 'event', id: `u${m.timestamp}`, text: '较早的对话已整理成摘要，助手按摘要继续', at: m.timestamp };
   const selection = CONTEXT.exec(raw)?.[1]?.split(',').filter(Boolean) ?? [];
   return { kind: 'user', id: `u${m.timestamp}`, text: raw.replace(CONTEXT, ''), ...(selection.length ? { selection } : {}), at: m.timestamp };
 }
@@ -144,8 +181,12 @@ export class AgentHub {
   readonly status: AgentStatus;
   private readonly dir = join(config.dataDir, 'agent');
   private readonly sessions = new Map<string, Promise<Session>>();
-  /** Sessions once open, for task events. */
+  /** Sessions once open. */
   private readonly live = new Map<string, Session>();
+  private watches: Watch[] = [];
+  private readonly watchFile: string;
+  /** Context size (tokens of the last request) at which the early conversation is condensed. */
+  private readonly compactAt: number;
   private readonly models: Models;
   private readonly model?: Model<Api>;
   private readonly thinking: ThinkingLevel;
@@ -155,9 +196,10 @@ export class AgentHub {
   constructor(
     private readonly deps: CanvasDeps,
     private readonly emit: (e: AgentEventData) => void,
-    /** For tests: another model collection and "provider/model". */
-    opts: { models?: Models; model?: string } = {},
+    /** For tests: another model collection and "provider/model", and when to condense. */
+    opts: { models?: Models; model?: string; compactAt?: number } = {},
   ) {
+    this.watchFile = join(this.dir, 'watches.json');
     const models = builtinModels();
     let name = opts.model ?? (process.env.AGENT_MODEL?.trim() || DEFAULT_MODEL);
     const baseUrl = process.env.AGENT_BASE_URL?.trim();
@@ -173,6 +215,7 @@ export class AgentHub {
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
     this.tools = canvasTools(deps, new ResultWriter(deps)).filter((t) => vision || !t.vision);
     this.labels = new Map(this.tools.map((t) => [t.name, t]));
+    this.compactAt = opts.compactAt ?? Math.min(100_000, Math.floor((this.model?.contextWindow ?? 128_000) / 2));
     deps.tasks.on('task', (t: Task) => this.onTask(t));
     this.status = this.model
       ? { ready: false, model: name, vision, reason: '正在检查模型配置' }
@@ -181,6 +224,13 @@ export class AgentHub {
 
   async init() {
     await mkdir(this.dir, { recursive: true });
+    try {
+      this.watches = JSON.parse(await readFile(this.watchFile, 'utf8')) as Watch[];
+    } catch {
+      /* none */
+    }
+    // Batches that finished while the server was down.
+    setTimeout(() => this.checkWatches(), 3000);
     if (!this.model) return;
     const auth = await this.models.checkAuth(this.model.provider).catch(() => undefined);
     const env = this.model.provider === 'custom' ? 'AGENT_API_KEY' : `${this.model.provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY`;
@@ -194,7 +244,7 @@ export class AgentHub {
 
   async view(projectId: string): Promise<AgentView> {
     const s = await this.session(projectId);
-    return { entries: this.entries(s), running: s.running };
+    return { entries: this.entries(s), running: s.running, usage: s.usage };
   }
 
   /** Starts a run, or steers the one in progress. Returns once the message is accepted. */
@@ -218,9 +268,18 @@ export class AgentHub {
       s.interrupt = new AbortController();
       return;
     }
+    this.syncPolicy(s);
     s.running = true;
     this.emit({ projectId, running: true });
     s.done = this.run(s, message);
+  }
+
+  /** Tells the model when the commercial-only switch changed since it was last told (only between runs). */
+  private syncPolicy(s: Session) {
+    const on = Boolean(this.deps.commercialOnly?.());
+    if (on === s.commercial || s.running) return;
+    s.commercial = on;
+    s.agent.state.messages = [...s.agent.state.messages, { role: 'system', content: commercialRules(on), timestamp: Date.now() }];
   }
 
   async abort(projectId: string) {
@@ -228,10 +287,7 @@ export class AgentHub {
     if (!s) return;
     s.agent.clearAllQueues();
     s.agent.abort();
-    if (s.watches.length) {
-      s.watches = [];
-      this.event(s, '已停止：已提交的任务会继续跑，跑完后助手不会再自动接着做');
-    }
+    if (this.dropWatches(projectId)) this.event(s, '已停止：已提交的任务会继续跑，跑完后助手不会再自动接着做');
   }
 
   /** The user's answer to work a tool held for approval. */
@@ -273,12 +329,14 @@ export class AgentHub {
 
   async clear(projectId: string) {
     const s = await this.session(projectId);
-    s.watches = [];
+    this.dropWatches(projectId);
     s.agent.clearAllQueues();
     s.agent.abort();
     // After the run's own save, which would otherwise write the old conversation back.
     await s.done;
     s.agent.reset();
+    s.archived = [];
+    s.usage = { tokens: 0, cost: 0 };
     await rm(this.file(projectId), { force: true });
     this.emit({ projectId, reset: true });
   }
@@ -290,6 +348,7 @@ export class AgentHub {
     s?.agent.abort();
     this.sessions.delete(projectId);
     this.live.delete(projectId);
+    this.dropWatches(projectId);
     await rm(this.file(projectId), { force: true });
   }
 
@@ -310,16 +369,26 @@ export class AgentHub {
   private async open(projectId: string): Promise<Session> {
     if (!ID.test(projectId) || !(await this.deps.projects.get(projectId))) throw new RequestError('画布不存在');
     if (!this.model) throw new RequestError(this.status.reason ?? '画布助手还没有配置好');
-    let messages: AgentMessage[] = [];
+    let saved: { messages?: AgentMessage[]; usage?: AgentUsage; archived?: AgentEntry[] } = {};
     try {
-      messages = (JSON.parse(await readFile(this.file(projectId), 'utf8')) as { messages: AgentMessage[] }).messages ?? [];
+      saved = JSON.parse(await readFile(this.file(projectId), 'utf8'));
     } catch {
       /* new conversation */
     }
-    const s = { projectId, running: false, interrupt: new AbortController(), watches: [], autoRuns: 0 } as unknown as Session;
+    const messages = saved.messages ?? [];
+    const commercial = Boolean(this.deps.commercialOnly?.());
+    const s = {
+      projectId,
+      running: false,
+      interrupt: new AbortController(),
+      autoRuns: 0,
+      commercial,
+      usage: saved.usage ?? usageOf(messages),
+      archived: saved.archived ?? [],
+    } as unknown as Session;
     s.agent = new Agent({
       initialState: {
-        systemPrompt: systemPrompt(this.status.vision),
+        systemPrompt: systemPrompt(this.status.vision, commercial),
         model: this.model,
         thinkingLevel: this.thinking,
         tools: this.tools.map((t) => this.agentTool(t, s)),
@@ -350,30 +419,52 @@ export class AgentHub {
   }
 
   private watch(s: Session, what: string, items: CanvasItem[]) {
-    const tracked = items.filter((i) => i.taskId).map((i) => ({ id: i.id, name: i.name, taskId: i.taskId! }));
-    if (tracked.length) s.watches.push({ what, items: tracked });
+    const tracked = items.filter((i) => i.taskId).map((i) => ({ id: i.id, ...(i.name ? { name: i.name } : {}), taskId: i.taskId! }));
+    if (!tracked.length) return;
+    this.watches.push({ projectId: s.projectId, what, items: tracked });
+    void this.saveWatches();
   }
 
   private unwatch(s: Session, ids: string[]) {
     const known = new Set(ids);
-    s.watches = s.watches.map((w) => ({ ...w, items: w.items.filter((i) => !known.has(i.id)) })).filter((w) => w.items.length);
+    this.watches = this.watches
+      .map((w) => (w.projectId === s.projectId ? { ...w, items: w.items.filter((i) => !known.has(i.id)) } : w))
+      .filter((w) => w.items.length);
+    void this.saveWatches();
+  }
+
+  /** Forgets a board's pending notices; whether there were any. */
+  private dropWatches(projectId: string): boolean {
+    const before = this.watches.length;
+    this.watches = this.watches.filter((w) => w.projectId !== projectId);
+    if (this.watches.length === before) return false;
+    void this.saveWatches();
+    return true;
+  }
+
+  private async saveWatches() {
+    await writeFile(`${this.watchFile}.tmp`, JSON.stringify(this.watches));
+    await rename(`${this.watchFile}.tmp`, this.watchFile);
   }
 
   private onTask(t: Task) {
     if (ACTIVE.has(t.status)) return;
     // A wait_for_items call sees the same event and marks its items as seen; let it go first.
-    setTimeout(() => this.checkWatches(t), 500);
+    setTimeout(() => this.checkWatches(t.id), 500);
   }
 
-  private checkWatches(t: Task) {
-    for (const s of this.live.values()) {
-      for (const w of s.watches) {
-        if (!w.items.some((i) => i.taskId === t.id)) continue;
-        const tasks = this.deps.tasks.list(w.items.map((i) => i.taskId));
-        if (tasks.some((x) => ACTIVE.has(x.status))) continue;
-        s.watches = s.watches.filter((x) => x !== w);
-        this.finished(s, w, tasks);
-      }
+  /** Notices for batches that are over (all of them, or those with this task). */
+  private checkWatches(taskId?: string) {
+    for (const w of [...this.watches]) {
+      if (taskId && !w.items.some((i) => i.taskId === taskId)) continue;
+      const tasks = this.deps.tasks.list(w.items.map((i) => i.taskId));
+      if (tasks.some((x) => ACTIVE.has(x.status))) continue;
+      this.watches = this.watches.filter((x) => x !== w);
+      void this.saveWatches();
+      this.session(w.projectId).then(
+        (s) => this.finished(s, w, tasks),
+        (err) => console.error('agent: could not resume a board', err),
+      );
     }
   }
 
@@ -397,6 +488,7 @@ export class AgentHub {
 
   /** Starts (or queues) a run on something the user did not type. */
   private wake(s: Session, text: string) {
+    if (!this.status.ready) return;
     if (++s.autoRuns > MAX_AUTO_RUNS) {
       this.event(s, '自动继续的次数到上限了，先停在这里；说一句「继续」让助手接着做');
       return;
@@ -407,6 +499,7 @@ export class AgentHub {
       s.agent.followUp(message);
       return;
     }
+    this.syncPolicy(s);
     s.running = true;
     this.emit({ projectId: s.projectId, running: true });
     s.done = this.run(s, message);
@@ -457,6 +550,7 @@ export class AgentHub {
 
   private async run(s: Session, first: UserMessage) {
     try {
+      await this.compactIfLong(s);
       let next: AgentMessage[] = [first];
       while (next.length) {
         await s.agent.prompt(next);
@@ -470,14 +564,57 @@ export class AgentHub {
     } finally {
       s.running = false;
       await this.save(s).catch((err) => console.error('agent: could not save the conversation', err));
-      this.emit({ projectId: s.projectId, running: false });
+      this.emit({ projectId: s.projectId, running: false, usage: s.usage });
     }
+  }
+
+  /**
+   * Long conversations cost more on every request: once the last request's context passed `compactAt`,
+   * everything before the last few user turns is condensed by the model into a summary. The panel keeps
+   * the old rows.
+   */
+  private async compactIfLong(s: Session) {
+    const messages = s.agent.state.messages;
+    const last = messages.findLast((m) => m.role === 'assistant') as AssistantMessage | undefined;
+    const u = last?.usage;
+    if (!this.model || !u || u.input + u.cacheRead + u.cacheWrite + u.output < this.compactAt) return;
+    const turns = messages.flatMap((m, i) => (m.role === 'user' ? [i] : []));
+    if (turns.length <= KEEP_TURNS) return;
+    const cut = turns[turns.length - KEEP_TURNS];
+    const early = messages.slice(0, cut);
+    const old = early.filter((m) => m.role !== 'system');
+    if (old.length < 4) return;
+    this.event(s, '对话比较长了，正在把较早的部分整理成摘要…');
+    const reply = await this.models.completeSimple(this.model, {
+      systemPrompt: SUMMARY_PROMPT,
+      messages: [{ role: 'user', content: transcriptText(old), timestamp: Date.now() }],
+    });
+    const summary = reply.content
+      .map((c) => (c.type === 'text' ? c.text : ''))
+      .join('')
+      .trim();
+    this.addUsage(s, reply);
+    if (reply.stopReason === 'error' || !summary) {
+      this.event(s, '整理摘要没成功，先保持原样');
+      return;
+    }
+    s.archived = [...s.archived, ...this.entriesOf(old, s)];
+    s.agent.state.messages = [
+      ...early.filter((m) => m.role === 'system'),
+      { role: 'user', content: `<canvas_summary>\n${summary}\n</canvas_summary>`, timestamp: Date.now() },
+      ...messages.slice(cut),
+    ];
+    await this.save(s);
+  }
+
+  private addUsage(s: Session, m: AssistantMessage) {
+    s.usage = { tokens: s.usage.tokens + (m.usage?.totalTokens ?? 0), cost: s.usage.cost + (m.usage?.cost?.total ?? 0) };
   }
 
   private async save(s: Session) {
     const messages = s.agent.state.messages.filter((m) => m.role !== 'system').map(withoutImages);
     const file = this.file(s.projectId);
-    await writeFile(`${file}.tmp`, JSON.stringify({ version: 1, messages }));
+    await writeFile(`${file}.tmp`, JSON.stringify({ version: 2, messages, usage: s.usage, archived: s.archived }));
     await rename(`${file}.tmp`, file);
   }
 
@@ -500,10 +637,14 @@ export class AgentHub {
     return { ...base, status: approval?.state === 'rejected' ? 'error' : 'done', summary: details.summary ?? '' };
   }
 
-  /** The panel's view of the transcript. */
+  /** The panel's view of the conversation: condensed rows first, then the transcript. */
   private entries(s: Session): AgentEntry[] {
-    const { messages, streamingMessage, pendingToolCalls } = s.agent.state;
-    const all = streamingMessage ? [...messages, streamingMessage] : messages;
+    const { messages, streamingMessage } = s.agent.state;
+    return [...s.archived, ...this.entriesOf(streamingMessage ? [...messages, streamingMessage] : messages, s)];
+  }
+
+  private entriesOf(all: AgentMessage[], s: Session): AgentEntry[] {
+    const { streamingMessage, pendingToolCalls } = s.agent.state;
     const results = new Map<string, ToolResultMessage>();
     for (const m of all) if (m.role === 'toolResult') results.set(m.toolCallId, m as ToolResultMessage);
     const out: AgentEntry[] = [];
@@ -546,7 +687,11 @@ export class AgentHub {
         if (e.message.role === 'assistant') this.pushText(s, assistantEntry(e.message));
         break;
       case 'message_end':
-        if (e.message.role === 'assistant') this.pushText(s, assistantEntry(e.message), true);
+        if (e.message.role === 'assistant') {
+          this.pushText(s, assistantEntry(e.message), true);
+          this.addUsage(s, e.message);
+          this.emit({ projectId: s.projectId, usage: s.usage });
+        }
         break;
       case 'tool_execution_start': {
         const t = this.labels.get(e.toolName);

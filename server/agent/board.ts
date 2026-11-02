@@ -4,6 +4,7 @@ import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../src/lib/g
 import type { AssetStore } from '../assets.ts';
 import type { ItemsPatch, ProjectStore } from '../projects.ts';
 import type { TaskManager } from '../tasks.ts';
+import { COMMERCIAL_BLOCK } from '../../shared/licenses.ts';
 import { featureKey } from '../workflows/index.ts';
 
 /** What the agent needs from the server. */
@@ -16,6 +17,8 @@ export interface CanvasDeps {
   capabilities: () => Promise<Capabilities>;
   /** Tells open pages that a board changed. */
   changed: (project: Project) => void;
+  /** The user only wants models whose license allows commercial use. */
+  commercialOnly?: () => boolean;
 }
 
 /** Same long sides the page uses, so agent results look like the user's own. */
@@ -119,6 +122,8 @@ export async function ensureRunnable(deps: CanvasDeps, request: TaskRequest) {
   const caps = await deps.capabilities();
   if (!caps.comfyOnline) throw new Error('现在连不上 ComfyUI，等它恢复后再试');
   const missing = caps.features[featureKey(request)] ?? [];
+  const blocked = missing.filter((m) => m.startsWith(COMMERCIAL_BLOCK)).map((m) => m.slice(COMMERCIAL_BLOCK.length));
+  if (blocked.length) throw new Error(`用户开启了「只用可商用的模型」，这个工具不能用：${blocked.join('；')}。换用可商用的模型或模板（list_workflows 里有标注）`);
   if (missing.length) throw new Error(`ComfyUI 服务器缺少：${missing.join('、')}`);
 }
 

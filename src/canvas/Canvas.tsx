@@ -2,7 +2,8 @@ import { Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CanvasItem } from '../../shared/types';
 import { addFiles, ensureVisible } from '../lib/actions';
-import { GAP, type Rect, boundsOf, intersects, placeRow, toScreen, toWorld } from '../lib/geometry';
+import { THUMB_PX } from '../../shared/media';
+import { GAP, type Rect, boundsOf, intersects, placeRow, toScreen, toWorld, visibleRect } from '../lib/geometry';
 import { beginGesture, endGesture, select, setComposer, setViewport, updateItems, useStore, zoomAt } from '../store';
 import { ContextMenu, type MenuState } from '../ui/ContextMenu';
 import { MaskCanvas } from '../editors/MaskEditor';
@@ -85,6 +86,7 @@ export function Canvas() {
   const ref = useRef<HTMLDivElement>(null);
   const items = useStore((s) => s.items);
   const viewport = useStore((s) => s.viewport);
+  const screen = useStore((s) => s.screen);
   const tool = useStore((s) => s.tool);
   const spaceHeld = useStore((s) => s.spaceHeld);
   const editing = useStore((s) => s.editing);
@@ -341,6 +343,9 @@ export function Canvas() {
   const panning = dragKind === 'pan';
   const cursor = panning ? 'grabbing' : tool === 'hand' || spaceHeld ? 'grab' : 'default';
   const showOverlays = !editing && dragKind !== 'move' && dragKind !== 'resize' && dragKind !== 'pan' && dragKind !== 'link';
+  // Half a screen of margin, so small pans do not remount items.
+  const view = visibleRect(viewport, screen.w, screen.h, 0.5);
+  const dpr = window.devicePixelRatio || 1;
 
   return (
     <div
@@ -367,9 +372,12 @@ export function Canvas() {
         style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`, ['--zoom' as string]: viewport.zoom }}
       >
         <Links draft={linkDraft} layer="below" hovered={hovered} />
-        {items.map((it) => (
-          <ItemView key={it.id} item={it} task={it.taskId ? tasks[it.taskId] : undefined} />
-        ))}
+        {items.map((it) =>
+          // Only what is in or near the view is mounted; originals load once an item is shown large.
+          intersects(it, view) || it.id === editing?.itemId ? (
+            <ItemView key={it.id} item={it} task={it.taskId ? tasks[it.taskId] : undefined} full={it.w * viewport.zoom * dpr > THUMB_PX} />
+          ) : null,
+        )}
         <Links draft={linkDraft} layer="above" hovered={hovered} />
         {editing && editing.kind !== 'outpaint' && <MaskCanvas key={editing.itemId} />}
       </div>
