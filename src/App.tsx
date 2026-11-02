@@ -5,7 +5,7 @@ import { OutpaintPanel } from './editors/OutpaintEditor';
 import { addFiles, duplicate, fitAll, loadWorkflows } from './lib/actions';
 import { api, subscribeEvents } from './lib/api';
 import { CLIP_MARKER, copySelection, hasInternalClipboard, pasteInternal } from './lib/clipboard';
-import { bootstrap, flushSave, setupAutosave, syncTasks } from './project';
+import { bootstrap, flushSave, onProjectEvent, refreshProject, setupAutosave, syncTasks } from './project';
 import { applyTask, redo, removeItems, select, setShowLinks, toast, undo, updateItems, useStore, zoomAt } from './store';
 import { Composer } from './ui/Composer';
 import { LeftToolbar } from './ui/LeftToolbar';
@@ -147,6 +147,7 @@ export function App() {
     let wasConnected = true;
     const stopEvents = subscribeEvents({
       onTask: applyTask,
+      onProject: onProjectEvent,
       onComfy: (online) => {
         useStore.setState({ comfyOnline: online });
         if (online) void refreshCaps(true);
@@ -155,6 +156,7 @@ export function App() {
         useStore.setState({ comfyOnline });
         active.forEach(applyTask);
         void syncTasks();
+        refreshProject();
       },
       onConnection: (ok) => {
         useStore.setState({ serverOnline: ok });

@@ -7,12 +7,12 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import type { Capabilities, CustomWorkflow, PresetInfo, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
+import type { Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
 import { AssetStore, mimeFor, publicAsset } from './assets.ts';
 import { ComfyClient, ComfyError } from './comfy.ts';
 import { config } from './config.ts';
 import { PresetStore } from './presets.ts';
-import { ProjectStore } from './projects.ts';
+import { ProjectConflict, ProjectStore, type ItemsPatch } from './projects.ts';
 import { SettingsStore, normalizeComfyUrl } from './settings.ts';
 import { TaskManager } from './tasks.ts';
 import { WorkflowStore } from './workflowStore.ts';
@@ -58,7 +58,9 @@ const tasks = new TaskManager(
 );
 await Promise.all([assets.init(), projects.init(), workflows.init(), presets.init(), tasks.init()]);
 
-const comfyStatus = EventTargetLike();
+const comfyStatus = EventTargetLike<boolean>();
+/** Board changes, so open pages can merge edits made elsewhere (another tab, a script, an agent). */
+const projectEvents = EventTargetLike<{ id: string; updatedAt: number; by: string; deleted?: boolean }>();
 comfy.connect(
   (e) => tasks.onComfyEvent(e),
   (online) => {
@@ -363,11 +365,14 @@ app.get('/api/events', (c) =>
     const send = (event: string, data: unknown) => stream.writeSSE({ event, data: JSON.stringify(data) }).catch(() => {});
     const onTask = (t: Task) => void send('task', t);
     const onComfy = (online: boolean) => void send('comfy', { online });
+    const onProject = (e: { id: string; updatedAt: number; by: string }) => void send('project', e);
     tasks.on('task', onTask);
     comfyStatus.on(onComfy);
+    projectEvents.on(onProject);
     stream.onAbort(() => {
       tasks.off('task', onTask);
       comfyStatus.off(onComfy);
+      projectEvents.off(onProject);
     });
     await send('hello', { comfyOnline: comfy.online, active: tasks.active() });
     while (!stream.aborted) {
@@ -386,12 +391,41 @@ app.get('/api/projects/:id', async (c) => {
   const p = await projects.get(c.req.param('id'));
   return p ? c.json(p) : c.json({ error: '画布不存在' }, 404);
 });
+/** Who made a change: the page's per-tab id, or "external" for scripts and agents. */
+const writer = (c: { req: { header(name: string): string | undefined } }) => (c.req.header('x-infinode-client') ?? 'external').slice(0, 64);
+
 app.put('/api/projects/:id', async (c) => {
-  const p = await projects.save(c.req.param('id'), await c.req.json());
-  return p ? c.json({ updatedAt: p.updatedAt }) : c.json({ error: '画布不存在' }, 404);
+  const { baseUpdatedAt, ...patch } = await c.req.json<Partial<Pick<Project, 'name' | 'items' | 'viewport'>> & { baseUpdatedAt?: number }>();
+  // A whole-board save must say which version it started from; otherwise a page left open on old
+  // code (or any blind writer) would wipe changes made since. Scripts use PATCH …/items instead.
+  if (typeof baseUpdatedAt !== 'number') {
+    const current = await projects.get(c.req.param('id'));
+    if (!current) return c.json({ error: '画布不存在' }, 404);
+    return c.json({ error: '页面版本过旧，请刷新页面', project: current }, 409);
+  }
+  try {
+    const p = await projects.save(c.req.param('id'), patch, baseUpdatedAt);
+    if (!p) return c.json({ error: '画布不存在' }, 404);
+    projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: writer(c) });
+    return c.json({ updatedAt: p.updatedAt });
+  } catch (err) {
+    if (err instanceof ProjectConflict) return c.json({ error: err.message, project: err.project }, 409);
+    throw err;
+  }
+});
+// Scripts and agents: add / replace / remove items without overwriting what the page is doing.
+app.patch('/api/projects/:id/items', async (c) => {
+  const body = await c.req.json<ItemsPatch>();
+  if (!Array.isArray(body.upsert ?? []) || !Array.isArray(body.remove ?? [])) throw new RequestError('请求格式错误');
+  if ((body.upsert ?? []).some((i) => !i || typeof i.id !== 'string')) throw new RequestError('每个节点都需要 id');
+  const p = await projects.patchItems(c.req.param('id'), body);
+  if (!p) return c.json({ error: '画布不存在' }, 404);
+  projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: writer(c) });
+  return c.json({ updatedAt: p.updatedAt, itemCount: p.items.length });
 });
 app.delete('/api/projects/:id', async (c) => {
   await projects.remove(c.req.param('id'));
+  projectEvents.emit({ id: c.req.param('id'), updatedAt: Date.now(), by: writer(c), deleted: true });
   return c.json({ ok: true });
 });
 
@@ -411,11 +445,11 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 /** Tiny listener set for the ComfyUI online flag. */
-function EventTargetLike() {
-  const fns = new Set<(online: boolean) => void>();
+function EventTargetLike<T>() {
+  const fns = new Set<(value: T) => void>();
   return {
-    on: (fn: (online: boolean) => void) => void fns.add(fn),
-    off: (fn: (online: boolean) => void) => void fns.delete(fn),
-    emit: (online: boolean) => fns.forEach((fn) => fn(online)),
+    on: (fn: (value: T) => void) => void fns.add(fn),
+    off: (fn: (value: T) => void) => void fns.delete(fn),
+    emit: (value: T) => fns.forEach((fn) => fn(value)),
   };
 }

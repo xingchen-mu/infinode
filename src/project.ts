@@ -1,24 +1,125 @@
+import type { CanvasItem, Project } from '../shared/types';
 import { fitAll } from './lib/actions';
-import { api } from './lib/api';
+import { ConflictError, api, clientId, type ProjectEvent } from './lib/api';
 import { applyTask, resolveItems, toast, useStore } from './store';
 
 const LAST_KEY = 'infinode:last-project';
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let loading = false;
+let applyingRemote = false;
 
-async function save(keepalive = false) {
+/**
+ * The board as last agreed with the server. Local edits are measured against it when changes
+ * made elsewhere (another tab, a script, an agent) are merged in, and its updatedAt is sent with
+ * every save so a stale page cannot overwrite a newer board.
+ */
+let synced: { id: string; updatedAt: number; name: string; items: Map<string, string> } | null = null;
+
+function remember(p: Pick<Project, 'id' | 'updatedAt' | 'name' | 'items'>) {
+  synced = { id: p.id, updatedAt: p.updatedAt, name: p.name, items: new Map(p.items.map((i) => [i.id, JSON.stringify(i)])) };
+}
+
+/** Saves and merges run one at a time. */
+let chain: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.then(fn, fn);
+  chain = run.catch(() => {});
+  return run;
+}
+
+/**
+ * Three-way merge by item id against `base`: an item changed (or added) here keeps the local
+ * version; everything else follows `remote`, including its additions and deletions.
+ */
+export function mergeItems(base: Map<string, string>, local: CanvasItem[], remote: CanvasItem[]): CanvasItem[] {
+  const localById = new Map(local.map((i) => [i.id, i]));
+  const remoteIds = new Set(remote.map((i) => i.id));
+  const out: CanvasItem[] = [];
+  for (const r of remote) {
+    const l = localById.get(r.id);
+    const b = base.get(r.id);
+    if (!l) {
+      // Gone here: new on the server, or deleted here but changed there (the edit wins), or deleted here.
+      if (b === undefined || JSON.stringify(r) !== b) out.push(r);
+      continue;
+    }
+    out.push(b === undefined || JSON.stringify(l) !== b ? l : r);
+  }
+  for (const l of local) {
+    if (remoteIds.has(l.id)) continue;
+    const b = base.get(l.id);
+    // Added here, or deleted there but changed here; untouched items deleted there stay deleted.
+    if (b === undefined || JSON.stringify(l) !== b) out.push(l);
+  }
+  return out;
+}
+
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void save(), 700);
+}
+
+/** Folds a newer server board into the page (and its undo history) without losing local edits. */
+function mergeRemote(p: Project) {
+  const s = useStore.getState();
+  if (!synced || s.projectId !== p.id) return;
+  const base = synced.items;
+  const merge = (list: CanvasItem[]) => mergeItems(base, list, p.items);
+  const items = resolveItems(merge(s.items), s.tasks);
+  const projectName = s.projectName === synced.name ? p.name : s.projectName;
+  remember(p);
+  const ids = new Set(items.map((i) => i.id));
+  applyingRemote = true;
+  try {
+    useStore.setState({
+      items,
+      projectName,
+      past: s.past.map(merge),
+      future: s.future.map(merge),
+      selection: s.selection.filter((id) => ids.has(id)),
+      ...(s.lightboxId && !ids.has(s.lightboxId) ? { lightboxId: null } : {}),
+      ...(s.editing && !ids.has(s.editing.itemId) ? { editing: null } : {}),
+    });
+  } finally {
+    applyingRemote = false;
+  }
+  const unchanged = items.length === p.items.length && items.every((i) => synced!.items.get(i.id) === JSON.stringify(i));
+  if (!unchanged || projectName !== p.name) scheduleSave();
+}
+
+async function saveNow(keepalive: boolean) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { projectId, projectName, items, viewport } = useStore.getState();
+    if (!projectId || synced?.id !== projectId) return;
+    useStore.setState({ saveState: 'saving' });
+    try {
+      const { updatedAt } = await api.saveProject(
+        projectId,
+        { name: projectName, items, viewport, baseUpdatedAt: synced.updatedAt },
+        keepalive,
+      );
+      // The page may have switched boards while this was in flight.
+      if (synced?.id === projectId) remember({ id: projectId, updatedAt, name: projectName, items });
+      useStore.setState({ saveState: 'saved' });
+      return;
+    } catch (err) {
+      if (err instanceof ConflictError && !keepalive && synced?.id === projectId) {
+        mergeRemote(err.project);
+        continue;
+      }
+      useStore.setState({ saveState: 'error' });
+      return;
+    }
+  }
+  useStore.setState({ saveState: 'error' });
+}
+
+function save(keepalive = false) {
   clearTimeout(saveTimer);
   saveTimer = undefined;
-  const { projectId, projectName, items, viewport } = useStore.getState();
-  if (!projectId) return;
-  useStore.setState({ saveState: 'saving' });
-  try {
-    await api.saveProject(projectId, { name: projectName, items, viewport }, keepalive);
-    useStore.setState({ saveState: 'saved' });
-  } catch {
-    useStore.setState({ saveState: 'error' });
-  }
+  // On unload there is no time to wait for the queue.
+  return keepalive ? saveNow(true) : serial(() => saveNow(false));
 }
 
 export function flushSave() {
@@ -27,10 +128,35 @@ export function flushSave() {
 
 export function setupAutosave() {
   return useStore.subscribe((s, prev) => {
-    if (loading || !s.projectId || s.projectId !== prev.projectId) return;
+    if (loading || applyingRemote || !s.projectId || s.projectId !== prev.projectId) return;
     if (s.items === prev.items && s.viewport === prev.viewport && s.projectName === prev.projectName) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void save(), 700);
+    scheduleSave();
+  });
+}
+
+/** After a reconnect: changes made while the event stream was down would otherwise be missed. */
+export function refreshProject() {
+  const id = useStore.getState().projectId;
+  if (id) onProjectEvent({ id, updatedAt: Number.MAX_SAFE_INTEGER, by: 'reconnect' });
+}
+
+/** A board changed on the server; merge it in when it is the open one and someone else changed it. */
+export function onProjectEvent(e: ProjectEvent) {
+  if (e.id !== useStore.getState().projectId || e.by === clientId) return;
+  if (e.deleted) {
+    toast('这个画布已在别处被删除', 'error');
+    return;
+  }
+  void serial(async () => {
+    if (!synced || synced.id !== e.id || e.updatedAt <= synced.updatedAt) return;
+    try {
+      const p = await api.project(e.id);
+      if (p.updatedAt <= synced.updatedAt) return;
+      mergeRemote(p);
+    } catch {
+      return;
+    }
+    await syncTasks(); // placeholders added elsewhere may already be finished
   });
 }
 
@@ -78,6 +204,7 @@ export async function openProject(id: string) {
       lightboxId: null,
       saveState: 'saved',
     });
+    remember(p);
     localStorage.setItem(LAST_KEY, p.id);
     if (fresh && p.items.length) fitAll();
   } finally {

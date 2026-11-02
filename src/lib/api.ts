@@ -13,6 +13,23 @@ import type {
 
 export type WorkflowData = Omit<CustomWorkflow, 'id' | 'createdAt' | 'updatedAt'>;
 
+/** Identifies this tab's own board saves, so their change events are not merged back in. */
+export const clientId = `tab-${crypto.randomUUID().slice(0, 8)}`;
+
+/** A save refused because the board changed elsewhere; carries the current board. */
+export class ConflictError extends Error {
+  constructor(message: string, readonly project: Project) {
+    super(message);
+  }
+}
+
+export interface ProjectEvent {
+  id: string;
+  updatedAt: number;
+  by: string;
+  deleted?: boolean;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -27,7 +44,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     data = undefined;
   }
-  if (!res.ok) throw new Error((data as { error?: string })?.error ?? `请求失败 (${res.status})`);
+  const message = (data as { error?: string })?.error ?? `请求失败 (${res.status})`;
+  if (res.status === 409 && (data as { project?: Project })?.project) throw new ConflictError(message, (data as { project: Project }).project);
+  if (!res.ok) throw new Error(message);
   return data as T;
 }
 
@@ -61,8 +80,18 @@ export const api = {
   projects: () => request<ProjectSummary[]>('/api/projects'),
   createProject: (name?: string) => request<Project>('/api/projects', json('POST', { name })),
   project: (id: string) => request<Project>(`/api/projects/${id}`),
-  saveProject: (id: string, patch: Partial<Pick<Project, 'name' | 'items' | 'viewport'>>, keepalive = false) =>
-    request<{ updatedAt: number }>(`/api/projects/${id}`, { ...json('PUT', patch), keepalive }),
+  saveProject: (
+    id: string,
+    patch: Partial<Pick<Project, 'name' | 'items' | 'viewport'>> & { baseUpdatedAt?: number },
+    keepalive = false,
+  ) => {
+    const init = json('PUT', patch);
+    return request<{ updatedAt: number }>(`/api/projects/${id}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string>), 'X-Infinode-Client': clientId },
+      keepalive,
+    });
+  },
   deleteProject: (id: string) => request<{ ok: true }>(`/api/projects/${id}`, { method: 'DELETE' }),
 
   settings: () => request<Settings>('/api/settings'),
@@ -85,6 +114,7 @@ export interface EventHandlers {
   onTask(task: Task): void;
   onComfy(online: boolean): void;
   onHello(data: { comfyOnline: boolean; active: Task[] }): void;
+  onProject(e: ProjectEvent): void;
   onConnection(ok: boolean): void;
 }
 
@@ -97,6 +127,7 @@ export function subscribeEvents(h: EventHandlers): () => void {
   });
   es.addEventListener('task', (e) => h.onTask(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('comfy', (e) => h.onComfy(JSON.parse((e as MessageEvent).data).online));
+  es.addEventListener('project', (e) => h.onProject(JSON.parse((e as MessageEvent).data)));
   es.onerror = () => h.onConnection(false);
   return () => es.close();
 }
