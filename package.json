@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "description": "Infinite canvas for ComfyUI: generate, edit and animate images on a board, with every result linked to its inputs.",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "MIT",
   "keywords": [
     "comfyui",
     "infinite-canvas",

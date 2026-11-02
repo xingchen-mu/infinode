@@ -49,13 +49,8 @@ npm run test:wf -- '{"op":"image.generate","model":"zimage","prompt":"a cat","as
 
 ## 贡献授权
 
-本项目采用"个人免费、商用授权"的模式（见 [LICENSE](LICENSE) 和 [COMMERCIAL.md](COMMERCIAL.md)）。提交 Pull Request 即表示你同意：
-
-- 你的贡献是你本人的原创，或你有权提交它
-- 你的贡献按本项目的许可证发布，并授予项目维护者永久、全球、免费、非独占的权利，可以把你的贡献包含在本项目的商业授权中一并授权给他人
-
-如果不同意，请不要提交代码，可以通过 Issue 描述你的想法。
+本项目采用 [MIT 许可证](LICENSE)。提交 Pull Request 即表示你确认这份贡献是你本人的原创，或你有权提交它，并同意它按 MIT 许可证发布。
 
 ---
 
-**English summary:** Issues and PRs are welcome. Run `npm run typecheck` and `npm test` before submitting; CI runs typecheck, build, the unit tests (including the canvas assistant on pi's faux model) and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit, and you agree that it is released under this project's license and may also be included in the commercial licenses the maintainers grant (a perpetual, worldwide, royalty-free, non-exclusive grant).
+**English summary:** Issues and PRs are welcome. Run `npm run typecheck` and `npm test` before submitting; CI runs typecheck, build, the unit tests (including the canvas assistant on pi's faux model) and a startup smoke test (`npm run smoke`) on Node 22, 24 and 26 for every PR. By submitting a pull request you confirm the contribution is yours to submit and agree that it is released under the MIT License.

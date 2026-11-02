@@ -247,12 +247,9 @@ Infinode 的许可证只管它自己的代码，你用的每个模型另有许�
 
 ## 许可证
 
-Infinode 是**源码公开**的项目，采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+Infinode 采用 [MIT 许可证](LICENSE)：个人和公司都可以免费使用、修改、分发，包括商用。
 
-- **个人和非商业使用免费**：自己创作、学习、研究，以及教育、科研、公益机构
-- **商业使用需要授权**：公司内部使用、集成进收费产品或服务、用它接单等，见 [COMMERCIAL.md](COMMERCIAL.md)
-
-注意：ComfyUI、自定义节点和模型各有自己的许可证，部分模型不允许商用，见[模型许可证](#模型许可证)。`presets/` 中的模板来自 ComfyUI 官方模板（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+注意：MIT 只覆盖 Infinode 自己的代码。ComfyUI、自定义节点和模型各有自己的许可证，部分模型不允许商用，见[模型许可证](#模型许可证)；商用时可以在设置里打开「只用可以商用的模型」。`presets/` 中的模板来自 ComfyUI 官方模板（MIT），见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 欢迎参与贡献，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -279,7 +276,7 @@ npm install
 npm run dev   # open http://localhost:5173, then set your ComfyUI address in Settings
 ```
 
-**License:** source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for personal and other noncommercial use; commercial use requires a license, see [COMMERCIAL.md](COMMERCIAL.md).
+**License:** [MIT](LICENSE), free for personal and commercial use.
 
 **Model licenses are separate.** The built-in image tools use Qwen-Image 2.1, which is licensed for research and evaluation only. MiniMax H3 allows commercial use with conditions, but its license does not cover the US, the EU, the UK or South Korea: the model may not be used, nor its outputs displayed, there. Z-Image Turbo, Qwen-Image 2512 / Edit 2511, Wan 2.2 and SeedVR2 are Apache 2.0. Check each model's own license before use.
 
