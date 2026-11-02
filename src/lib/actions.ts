@@ -34,6 +34,16 @@ export function ensureVisible(r: Rect) {
   }
 }
 
+/** Pans to new items once the board change that adds them has been merged in. */
+export async function revealItems(ids: string[]) {
+  for (let i = 0; i < 20; i++) {
+    const items = get().items.filter((it) => ids.includes(it.id));
+    const bounds = boundsOf(items);
+    if (bounds && items.length === ids.length) return ensureVisible(bounds);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
 export function fitAll() {
   const { items, screen } = get();
   const width = viewWidth();

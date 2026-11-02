@@ -6,7 +6,7 @@
 
 **为 ComfyUI 深度适配的无限画布** · 生图、改图、生视频，每个结果都用连线连回它的来源
 
-[功能](#功能) · [快速开始](#快速开始) · [官方模板](#官方模板) · [导入你的工作流](#导入你自己的工作流) · [许可证](#许可证) · [English](#english)
+[功能](#功能) · [快速开始](#快速开始) · [画布助手](#画布助手) · [Claude Code / Codex](#用-claude-code--codex-操作画布mcp) · [官方模板](#官方模板) · [导入你的工作流](#导入你自己的工作流) · [许可证](#许可证) · [English](#english)
 
 <img src="docs/media/hero.png" alt="Infinode 画布" />
 
@@ -15,6 +15,8 @@
 ## 这是什么
 
 ComfyUI 很强，但节点图不适合"边看边改"的创作。Infinode 是一个跑在你自己电脑上的网页画布：在底部写一句话出图，选中图片点一下就能改图、扩图、抠图、超清、生成视频，所有生成都交给**你自己的 ComfyUI** 完成。每个结果都会用一条线连回它的输入，整条创作链一目了然。
+
+也可以让 AI 来操作画布：右上角的**画布助手**能听懂"把选中的图各做一段视频"这样的话，甚至从一句话做出一条多镜头短剧；你常用的 **Claude Code、Codex** 也能通过 MCP 直接读写画布、出图出视频。
 
 Infinode 只做画布，不包含、也不分发任何模型。用哪个模型、哪个工作流，完全由你的 ComfyUI 决定；模型的许可证由使用者自己遵守，见[模型许可证](#模型许可证)。
 
@@ -36,6 +38,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - **本地部署**：页面和数据都在你自己的机器上；ComfyUI 可以在本机、局域网或远程服务器（支持自动 SSH 隧道）
 - **实时进度**：排队位置、当前阶段、进度条、已用时间，可随时取消，失败一键重试
 - **画布助手**：右上角「助手」打开对话面板，用一句话让它读画布、看图、出图、出视频、运行你的工作流，结果照样连线；还能从一句话做到一条多镜头短剧（剧本 → 分镜 → 设定图 → 关键帧 → 视频 → 剪辑成片）。模型可用 DeepSeek 等，也可接任意 OpenAI 兼容接口
+- **接入 Claude Code / Codex**：内置 MCP 服务，外部 agent 能用和画布助手同一套工具操作画布，你在页面上实时看到结果
 - **文本节点**：剧本、分镜表、备注直接放在画布上，双击编辑
 
 <table>
@@ -64,6 +67,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - [Node.js](https://nodejs.org/) 22.19 或更高
 - 一个可以访问的 [ComfyUI](https://github.com/comfyanonymous/ComfyUI)（建议较新的版本，官方模板依赖新版自带的节点）
 - 桌面浏览器（Chrome / Edge / Safari）
+- 可选：[ffmpeg](https://ffmpeg.org/)，画布助手剪辑成片、查看视频画面时要用（macOS：`brew install ffmpeg`）
 
 ```bash
 git clone <本仓库地址> infinode
@@ -99,22 +103,72 @@ Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的�
 | 画布助手 | 右上角「助手」，用一句话说要做什么；发送时会带上画布上选中的节点 |
 | 文本 | 左侧工具栏「添加文本」，双击编辑；支持简单的 Markdown 和表格 |
 
-### 画布助手
+## 画布助手
+
+右上角「助手」打开对话面板。它能看到画布上有什么、你选中了哪些节点，替你出图、改图、出视频、运行你导入的工作流，结果和你手动做的一样放在画布上并连好线。可以这样说：
+
+- 「把选中的三张图各做一段 5 秒视频」
+- 「用选中的人物图，生成他在雨夜街头的三张不同景别的照片」
+- 「看看选中的图有没有问题，有问题就重新生成」
+
+### 配置
 
 助手用的是你自己的大模型 API key，在项目根目录的 `.env` 里配置，然后重启 `npm run dev`：
 
 ```bash
-DEEPSEEK_API_KEY=sk-...                 # 默认模型 deepseek/deepseek-flash（能看图）
+DEEPSEEK_API_KEY=sk-...                   # 默认模型 deepseek/deepseek-flash（能看图）
 # AGENT_MODEL=anthropic/claude-sonnet-5-5 # 也可以换成 pi-ai 支持的其它模型，配上对应的 key
 # 或者任意 OpenAI 兼容接口（豆包、百炼、Ollama、vLLM…）：
 # AGENT_BASE_URL=http://127.0.0.1:11434/v1
 # AGENT_MODEL=qwen3:32b
 # AGENT_API_KEY=...
+# AGENT_VISION=1                          # 这个模型能看图
 ```
 
 助手会把画布概况（节点名称、提示词、文本内容）和它查看的图片发给你配置的模型服务。key 只保存在你的机器上；把画布共享到局域网时，助手也只能在运行服务的那台电脑上使用。
 
-**做短剧**：跟助手说故事和镜头，比如「做一个两个镜头的小短剧：…」。它会先把剧本和分镜表写成画布上的文本节点给你看，你认可后依次出角色设定图、场景图、每个镜头的关键帧（自己拼图检查一遍），再每个镜头生成一段视频，最后按分镜的秒数裁剪拼成成片。每一批跑完它会自动接着做，页面关了也照样进行；批量生成视频前会在面板上弹出确认卡，写明预计占用 GPU 多久，你点「开始」才会提交。剪辑成片和查看视频画面需要运行服务的电脑装有 [ffmpeg](https://ffmpeg.org/)（macOS：`brew install ffmpeg`）。
+### 做短剧
+
+跟助手说故事和镜头，比如「做一个两个镜头的小短剧：深夜便利店门口，一个女孩在等人……」。它会按这个顺序做，每一步都留在画布上，你随时可以改：
+
+1. 把**剧本**和**分镜表**写成画布上的文本节点，等你认可
+2. 出**角色设定图**（白底全身照、正脸特写）和**场景图**
+3. 每个镜头出一张**关键帧**，拼成一张图自己检查一遍，有问题的单独重做
+4. 每个镜头生成一段**视频**：提交前面板上会弹出确认卡，写明段数和预计占用 GPU 多久，你点「开始」才会提交
+5. 先听每段的台词在哪几秒，再按分镜**剪辑成片**，台词不会被剪掉
+
+每一批跑完它会自动接着做，页面关了也照样进行；你可以随时插话、停止，或者说「重新剪一版」。
+
+## 用 Claude Code / Codex 操作画布（MCP）
+
+Infinode 的后端自带一个 MCP 服务，地址是 `http://127.0.0.1:8787/mcp`。Claude Code、Codex 这类 agent 接上以后，能用和画布助手同一套工具读画布、看图、出图出视频、写剧本、剪辑成片，你在页面上实时看到结果。先运行 `npm run dev`（或 `npm start`），再接入：
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http infinode http://127.0.0.1:8787/mcp
+```
+
+**Codex**
+
+```bash
+codex mcp add infinode --url http://127.0.0.1:8787/mcp
+```
+
+或者写进 `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.infinode]
+url = "http://127.0.0.1:8787/mcp"
+tool_timeout_sec = 600   # 默认 60 秒；等出图、剪辑会更久
+```
+
+接好后直接说「看看我在 Infinode 里选中的图，帮它生成三个不同背景的版本」就行。
+
+- **它知道你在看什么**：打开着的页面会把当前画布、选中的节点和视野位置告诉后端。外部 agent 先调用 `get_context`，就知道「这张」「选中的」指哪些节点；不指定画布时，默认操作你正在看的那张。新生成的节点放在你的视野里，画布会自动移过去。
+- **哪些操作要你同意**：读画布、看图、等结果这类工具标注了只读，客户端可以直接放行；出图、出视频、剪辑会改动画布，按客户端的设置征求你同意。批量出视频很占 GPU，返回结果里会写明预计时长。
+- **工具一览**：`get_context`、`list_boards`、`create_board`、`read_board`、`view_images`、`review_items`、`generate_image`、`batch_generate_images`、`generate_video`、`batch_generate_videos`、`list_workflows`、`run_workflow`、`wait_for_items`、`cancel_items`、`write_note`、`inspect_clips`、`assemble_video`。
+- **只对本机开放**：`/mcp` 只接受同一台电脑上的连接；把画布共享到局域网时，别人也连不上。只支持 stdio 的客户端可以用 [mcp-remote](https://www.npmjs.com/package/mcp-remote) 转接：`npx mcp-remote http://127.0.0.1:8787/mcp`。
 
 ## 官方模板
 
@@ -177,6 +231,12 @@ Infinode 的许可证只管它自己的代码，你用的每个模型另有许�
 
 **生产部署？** `npm run build && npm start`，只占用一个端口（默认 `http://127.0.0.1:8787`）。
 
+**助手提示没有配置 API key？** 在 `.env` 里加上对应的 key（DeepSeek 是 `DEEPSEEK_API_KEY`），然后重启 `npm run dev`。
+
+**Codex 调用 Infinode 的工具时超时？** Codex 默认每次工具调用只等 60 秒。在 `config.toml` 里把 `tool_timeout_sec` 调大，或者让它分几次调用 `wait_for_items`（每次默认等 50 秒）。
+
+**改了 `PORT`？** MCP 地址跟着变成 `http://127.0.0.1:<PORT>/mcp`。
+
 ## 许可证
 
 Infinode 是**源码公开**的项目，采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
@@ -202,6 +262,7 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 - Drag a line out of an image to place the next generation exactly where you want it
 - Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`). It can take a short drama from a one-line idea to a cut: script and shot list as text notes, character and scene sheets, keyframes, one video per shot (after you approve the GPU time), then an edit (needs ffmpeg)
 - Text notes on the board for scripts, shot lists and comments
+- Built-in MCP server at `http://127.0.0.1:8787/mcp` (this machine only): Claude Code (`claude mcp add --transport http infinode http://127.0.0.1:8787/mcp`), Codex (`codex mcp add infinode --url http://127.0.0.1:8787/mcp`) and other agents get the same canvas tools as the assistant, and know which board and items you have selected in the page
 
 ```bash
 git clone <this repository> infinode && cd infinode

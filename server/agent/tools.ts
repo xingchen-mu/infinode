@@ -59,6 +59,10 @@ export interface CanvasTool<A = Record<string, unknown>> {
   parameters: Record<string, unknown>;
   /** Only offered to models that can see images. */
   vision?: boolean;
+  /** Changes nothing (outside agents may run these without asking). */
+  readOnly?: boolean;
+  /** Cancels or removes things. */
+  destructive?: boolean;
   /** What a call is doing, from its arguments. */
   describe(args: A): string;
   run(args: A, ctx: ToolContext): Promise<ToolOutput>;
@@ -124,10 +128,44 @@ function inputsLine(wf: WorkflowLike): string {
   return [...new Set(wf.inputs.map(describe).filter(Boolean))].join('；') || '无';
 }
 
-export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[] {
+/**
+ * `panel`: the in-app assistant, which is woken when batches finish and asks for approval in the panel.
+ * `mcp`: an outside agent (Claude Code, Codex…), which waits with wait_for_items and asks its user itself.
+ */
+export type ToolHost = 'panel' | 'mcp';
+
+export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHost = 'panel'): CanvasTool[] {
+  const afterBatch = host === 'panel' ? '这一批全部结束时你会自动收到一条通知，不用 wait_for_items。' : '用 wait_for_items 等结果（单次等待有上限，超时就再调用一次）。';
+
+  const launchVideos = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
+    const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
+    const p = await readBoard(deps, ctx.projectId);
+    const batch: BatchJob[] = jobs.map((j) => {
+      const frames = findItems(p, j.frames);
+      const media = inputMedia(deps, frames, 'image');
+      const first = frames[0];
+      return {
+        request: { op: 'video.generate', model: 'minimax', prompt: j.prompt, aspect: 'auto', quality, duration: j.duration, images: media.map((m) => m.id) },
+        inputs: frames,
+        name: j.name ?? undefined,
+        // Same height as its frame, so the storyboard keeps one row per shot.
+        size: { w: Math.round(first.h * (media[0].width / media[0].height)), h: first.h },
+      };
+    });
+    const { items, failed } = await launchBatch(deps, writer, ctx.projectId, batch, { layout: 'beside', view: ctx.view });
+    if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
+    ctx.notify?.(`${host === 'panel' ? '用户确认后提交的' : ''} ${items.length} 段视频`.trim(), items);
+    return {
+      text: `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}${ctx.notify ? '' : `\n${afterBatch}`}`,
+      summary: `${items.length} 段已提交${failed.length ? `，${failed.length} 段失败：${failed[0].error}` : ''}`,
+      items: items.map((i) => i.id),
+    };
+  };
+
   return [
     tool<{ ids?: string[] }>({
       name: 'read_board',
+      readOnly: true,
       label: '读取画布',
       description:
         '列出画布上的节点：id、图片还是视频、名称、尺寸或生成状态、由哪些节点生成、提示词。传 ids 时只看这些节点，给出完整提示词和生成参数。',
@@ -155,6 +193,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
 
     tool<{ ids: string[] }>({
       name: 'view_images',
+      readOnly: true,
       label: '查看图片',
       vision: true,
       description: '查看画布上的图片节点（一次最多 4 张），用来检查生成质量或看懂参考图。视频看不了，可以看它的首帧或参考图。',
@@ -285,6 +324,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
 
     tool<Record<string, never>>({
       name: 'list_workflows',
+      readOnly: true,
       label: '查看工作流',
       description: '列出用户导入的 ComfyUI 工作流和官方模板里现在能用的那些：id、名称、输出图片还是视频、需要哪些输入和参数。',
       parameters: { type: 'object', properties: {} },
@@ -383,6 +423,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
 
     tool<{ ids: string[]; timeout_seconds?: number }>({
       name: 'wait_for_items',
+      readOnly: true,
       label: '等待结果',
       description:
         '等这些节点生成完（或失败），返回每个的结果。需要拿结果做下一步时才用；视频很慢，除非用户要求，否则提交后不必等。超时后返回当前进度，可以再次调用。',
@@ -488,7 +529,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
       label: '批量出图',
       description:
         `一次提交多张图（最多 ${MAX_BATCH} 张），每张有自己的提示词和参考图（规则同 generate_image）。新节点按顺序排成一行或一列。` +
-        '提交后立刻返回；这一批全部结束时，你会自动收到一条通知，不用 wait_for_items。分镜关键帧用 layout=column（按镜头顺序从上到下），name 写镜头编号。',
+        `提交后立刻返回；${afterBatch}分镜关键帧用 layout=column（按镜头顺序从上到下），name 写镜头编号。`,
       parameters: {
         type: 'object',
         properties: {
@@ -542,7 +583,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
         const list = items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('\n');
         const errors = failed.map((f) => `第 ${f.index + 1} 张提交失败：${f.error}`).join('\n');
         return {
-          text: `已提交 ${items.length} 张：\n${list}${errors ? `\n${errors}` : ''}\n全部结束时你会收到通知。`,
+          text: `已提交 ${items.length} 张：\n${list}${errors ? `\n${errors}` : ''}\n${ctx.notify ? '全部结束时你会收到通知。' : afterBatch}`,
           summary: `${items.length} 张已提交${failed.length ? `，${failed.length} 张失败` : ''}`,
           items: items.map((i) => i.id),
         };
@@ -554,7 +595,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
       label: '批量出视频',
       description:
         `一次提交多段图生视频（MiniMax H3，最多 ${MAX_BATCH} 段），每段从自己的首帧图开始，可选尾帧；视频放在首帧右边。` +
-        '这一步很耗 GPU，会先在面板上请用户确认：调用后告诉用户在等他确认，然后结束这一轮；用户确认后会自动提交，全部结束时你会收到通知。',
+        (host === 'panel'
+          ? '这一步很耗 GPU，会先在面板上请用户确认：调用后告诉用户在等他确认，然后结束这一轮；用户确认后会自动提交，全部结束时你会收到通知。'
+          : `这一步很耗 GPU（每段 5–14 分钟，一块 GPU 排队跑），调用前先跟用户确认。提交后立刻返回；${afterBatch}`),
       parameters: {
         type: 'object',
         properties: {
@@ -589,6 +632,10 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
         });
         const seconds = jobs.reduce((n, j) => n + j.duration, 0);
         const minutes = Math.ceil((seconds * H3_COST[quality] + H3_WARMUP) / 60);
+        if (host === 'mcp') {
+          const out = await launchVideos({ quality, jobs }, ctx);
+          return { ...out, text: `${out.text}\n预计 GPU 约 ${minutes} 分钟（共 ${seconds} 秒、${quality}）。` };
+        }
         return {
           text: `已在面板上请用户确认：${jobs.length} 段、共 ${seconds} 秒、${quality}，预计 GPU 约 ${minutes} 分钟。用户确认后会自动提交，全部结束时你会收到通知。现在告诉用户在等他确认，然后结束这一轮。`,
           summary: '等待确认',
@@ -599,34 +646,12 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
           },
         };
       },
-      async approve(payload, ctx) {
-        const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
-        const p = await readBoard(deps, ctx.projectId);
-        const batch: BatchJob[] = jobs.map((j) => {
-          const frames = findItems(p, j.frames);
-          const media = inputMedia(deps, frames, 'image');
-          const first = frames[0];
-          return {
-            request: { op: 'video.generate', model: 'minimax', prompt: j.prompt, aspect: 'auto', quality, duration: j.duration, images: media.map((m) => m.id) },
-            inputs: frames,
-            name: j.name ?? undefined,
-            // Same height as its frame, so the storyboard keeps one row per shot.
-            size: { w: Math.round(first.h * (media[0].width / media[0].height)), h: first.h },
-          };
-        });
-        const { items, failed } = await launchBatch(deps, writer, ctx.projectId, batch, { layout: 'beside', view: ctx.view });
-        if (!items.length) throw new Error(failed[0]?.error ?? '提交失败');
-        ctx.notify?.(`用户确认后提交的 ${items.length} 段视频`, items);
-        return {
-          text: `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}`,
-          summary: `${items.length} 段已提交${failed.length ? `，${failed.length} 段失败：${failed[0].error}` : ''}`,
-          items: items.map((i) => i.id),
-        };
-      },
+      approve: launchVideos,
     }),
 
     tool<{ ids: string[] }>({
       name: 'review_items',
+      readOnly: true,
       label: '审片',
       vision: true,
       description: '把最多 16 个图片或视频节点拼成一张带编号的拼图来检查（视频取第 1 秒的画面）。比 view_images 省，适合整批检查人物是否一致、有没有多余的人、背景对不对。',
@@ -662,6 +687,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
 
     tool<{ ids: string[] }>({
       name: 'inspect_clips',
+      readOnly: true,
       label: '听声音',
       description:
         '查看视频节点的时长，以及哪几秒有明显的声音（生成的镜头里通常就是台词；环境声很轻，不算）。剪辑前用它决定每段裁到哪里：台词常常在镜头后半段才说，别按分镜秒数直接裁掉。',
@@ -767,6 +793,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter): CanvasTool[
 
     tool<{ ids: string[]; remove?: boolean }>({
       name: 'cancel_items',
+      destructive: true,
       label: '取消生成',
       description: '取消这些节点还在排队或生成中的任务。remove=true 时顺便把这些占位节点从画布上删掉（只删还没有结果的，已经生成好的图和视频不会删）。',
       parameters: {

@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { Canvas } from './canvas/Canvas';
 import { MaskPanel, resizeBrush, undoStroke, useMask } from './editors/MaskEditor';
 import { OutpaintPanel } from './editors/OutpaintEditor';
-import { addFiles, duplicate, fitAll, loadWorkflows } from './lib/actions';
+import { addFiles, duplicate, fitAll, loadWorkflows, revealItems } from './lib/actions';
+import { viewportCenter } from './lib/geometry';
 import { api, subscribeEvents } from './lib/api';
 import { CLIP_MARKER, copySelection, hasInternalClipboard, pasteInternal } from './lib/clipboard';
 import { bootstrap, flushSave, onProjectEvent, refreshProject, setupAutosave, syncTasks } from './project';
@@ -150,6 +151,9 @@ export function App() {
       onTask: applyTask,
       onProject: onProjectEvent,
       onAgent: onAgentEvent,
+      onReveal: (e) => {
+        if (e.projectId === useStore.getState().projectId) void revealItems(e.ids);
+      },
       onComfy: (online) => {
         useStore.setState({ comfyOnline: online });
         if (online) void refreshCaps(true);
@@ -167,6 +171,20 @@ export function App() {
         wasConnected = ok;
       },
     });
+    // Tell the server what this tab shows, so outside agents (MCP) know "this board" and "these items".
+    let presenceTimer: ReturnType<typeof setTimeout> | undefined;
+    const reportPresence = () => {
+      clearTimeout(presenceTimer);
+      presenceTimer = setTimeout(() => {
+        const { projectId, selection, viewport, screen } = useStore.getState();
+        if (!projectId || document.visibilityState !== 'visible') return;
+        void api.presence({ projectId, selection, view: viewportCenter(viewport, screen.w, screen.h - 160) }).catch(() => {});
+      }, 400);
+    };
+    const stopPresence = useStore.subscribe((s, prev) => {
+      if (s.projectId !== prev.projectId || s.selection !== prev.selection || s.viewport !== prev.viewport) reportPresence();
+    });
+    window.addEventListener('focus', reportPresence);
     const releaseSpace = () => useStore.setState({ spaceHeld: false });
     // Pinching over panels would otherwise zoom the whole page.
     const blockPageZoom = (e: Event) => {
@@ -182,6 +200,9 @@ export function App() {
     return () => {
       stopAutosave();
       stopEvents();
+      stopPresence();
+      clearTimeout(presenceTimer);
+      window.removeEventListener('focus', reportPresence);
       clearInterval(capsTimer);
       window.removeEventListener('wheel', blockPageZoom);
       window.removeEventListener('gesturestart', blockPageZoom);

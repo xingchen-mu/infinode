@@ -6,10 +6,11 @@ import { Readable } from 'node:stream';
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { AgentEventData, Capabilities, CustomWorkflow, PresetInfo, Project, Task, TaskRequest, WorkflowDraft } from '../shared/types.ts';
 import { AgentHub } from './agent/runtime.ts';
+import { CanvasMcp, type Presence } from './mcp.ts';
 import { AssetStore, mimeFor, publicAsset } from './assets.ts';
 import { ComfyClient, ComfyError } from './comfy.ts';
 import { config } from './config.ts';
@@ -64,17 +65,20 @@ const comfyStatus = EventTargetLike<boolean>();
 /** Board changes, so open pages can merge edits made elsewhere (another tab, a script, an agent). */
 const projectEvents = EventTargetLike<{ id: string; updatedAt: number; by: string; deleted?: boolean }>();
 const agentEvents = EventTargetLike<AgentEventData>();
-const agent = new AgentHub(
-  {
-    projects,
-    tasks,
-    assets,
-    workflows: () => [...workflows.list(), ...presets.list()],
-    capabilities: () => capabilities(),
-    changed: (p) => projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: 'agent' }),
-  },
-  (e) => agentEvents.emit(e),
-);
+/** New items from outside agents, for open pages to bring into view. */
+const revealEvents = EventTargetLike<{ projectId: string; ids: string[] }>();
+/** The board, selection and view the open page last reported (for outside agents: "this image"). */
+let presence: Presence | undefined;
+const canvasDeps = {
+  projects,
+  tasks,
+  assets,
+  workflows: () => [...workflows.list(), ...presets.list()],
+  capabilities: () => capabilities(),
+  changed: (p: Project) => projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: 'agent' }),
+};
+const agent = new AgentHub(canvasDeps, (e) => agentEvents.emit(e));
+const mcp = new CanvasMcp(canvasDeps, () => presence, (projectId, ids) => revealEvents.emit({ projectId, ids }), process.env.npm_package_version ?? 'dev');
 await agent.init();
 comfy.connect(
   (e) => tasks.onComfyEvent(e),
@@ -383,14 +387,17 @@ app.get('/api/events', (c) =>
     const onProject = (e: { id: string; updatedAt: number; by: string }) => void send('project', e);
     // The agent conversation stays on this machine, like the agent itself.
     const onAgent = (e: AgentEventData) => void send('agent', e);
+    const onReveal = (e: { projectId: string; ids: string[] }) => void send('reveal', e);
     tasks.on('task', onTask);
     comfyStatus.on(onComfy);
     projectEvents.on(onProject);
+    revealEvents.on(onReveal);
     if (isLocal(c)) agentEvents.on(onAgent);
     stream.onAbort(() => {
       tasks.off('task', onTask);
       comfyStatus.off(onComfy);
       projectEvents.off(onProject);
+      revealEvents.off(onReveal);
       agentEvents.off(onAgent);
     });
     await send('hello', { comfyOnline: comfy.online, active: tasks.active() });
@@ -482,6 +489,24 @@ app.delete('/api/agent/:projectId', async (c) => {
   return c.json({ ok: true });
 });
 
+// ------------------------------------------------------------------ outside agents (MCP)
+
+/** The open page reports what the user is looking at, so "this image" works for Claude Code or Codex. */
+app.put('/api/presence', async (c) => {
+  if (!isLocal(c)) return c.json({ ok: true });
+  const body = await c.req.json<{ projectId?: unknown; selection?: unknown; view?: { x?: unknown; y?: unknown } }>();
+  if (typeof body.projectId !== 'string') throw new RequestError('请求格式错误');
+  const view = body.view && Number.isFinite(body.view.x) && Number.isFinite(body.view.y) ? { x: Number(body.view.x), y: Number(body.view.y) } : undefined;
+  const selection = Array.isArray(body.selection) ? body.selection.filter((id): id is string => typeof id === 'string').slice(0, 200) : [];
+  presence = { projectId: body.projectId, selection, view, at: Date.now() };
+  return c.json({ ok: true });
+});
+// Same rule as the assistant: it can spend GPU time, so only this machine.
+app.all('/mcp', async (c) => {
+  if (!isLocal(c)) return c.json({ error: '只接受本机的 MCP 连接' }, 403);
+  return mcp.handle(c.req.raw);
+});
+
 if (config.production) {
   app.use('/*', serveStatic({ root: './dist' }));
   app.get('*', serveStatic({ path: './dist/index.html' }));
@@ -497,9 +522,13 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
-/** The request comes from this machine (directly or through the Vite dev proxy). */
-function isLocal(c: Parameters<typeof getConnInfo>[0]) {
-  return /^(127\.|::1$|::ffff:127\.)/.test(getConnInfo(c).remote.address ?? '');
+/**
+ * The request comes from this machine (directly or through the Vite dev proxy), addressed to a local
+ * name: a web page that rebinds its own domain to 127.0.0.1 still sends that domain as Host.
+ */
+function isLocal(c: Context) {
+  const host = (c.req.header('host') ?? '').replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  return /^(127\.|::1$|::ffff:127\.)/.test(getConnInfo(c).remote.address ?? '') && ['localhost', '127.0.0.1', '::1'].includes(host);
 }
 
 /** Tiny listener set for the ComfyUI online flag. */

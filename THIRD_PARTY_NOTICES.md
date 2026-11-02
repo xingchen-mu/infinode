@@ -35,7 +35,8 @@ Template thumbnails are not included; the app loads them from your own ComfyUI.
 
 Installed by `npm install`, not included in this repository, each under its own license:
 React, React DOM, Zustand, Hono, @hono/node-server, nanoid, image-size, @earendil-works/pi-ai and
-@earendil-works/pi-agent-core ([pi](https://github.com/earendil-works/pi), used for the canvas assistant) (MIT);
+@earendil-works/pi-agent-core ([pi](https://github.com/earendil-works/pi), used for the canvas assistant),
+@modelcontextprotocol/sdk (MIT);
 lucide-react (ISC); sharp (Apache-2.0; its prebuilt libvips binaries are LGPL-3.0-or-later).
 
 The canvas assistant calls `ffmpeg` / `ffprobe` from your system for editing and video frames, if installed;

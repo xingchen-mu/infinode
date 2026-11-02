@@ -2,7 +2,7 @@ import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import type { AgentEntry, AgentEventData, AgentStatus } from '../../shared/types';
-import { ensureVisible } from '../lib/actions';
+import { ensureVisible, revealItems } from '../lib/actions';
 import { api } from '../lib/api';
 import { boundsOf, viewportCenter } from '../lib/geometry';
 import { savePending } from '../project';
@@ -73,20 +73,11 @@ export function onAgentEvent(e: AgentEventData) {
   if (entry) {
     const i = s.entries.findIndex((x) => x.id === entry.id);
     patch.entries = i >= 0 ? s.entries.map((x, j) => (j === i ? entry : x)) : [...s.entries, entry];
-    if (entry.kind === 'tool' && entry.status === 'done' && entry.items?.length && CREATES.has(entry.tool)) void reveal(entry.items);
+    if (entry.kind === 'tool' && entry.status === 'done' && entry.items?.length && CREATES.has(entry.tool)) void revealItems(entry.items);
   }
   useAgent.setState(patch);
 }
 
-/** Pans to new items once the board change that adds them has been merged in. */
-async function reveal(ids: string[]) {
-  for (let i = 0; i < 20; i++) {
-    const items = useStore.getState().items.filter((it) => ids.includes(it.id));
-    const bounds = boundsOf(items);
-    if (bounds && items.length === ids.length) return ensureVisible(bounds);
-    await new Promise((r) => setTimeout(r, 150));
-  }
-}
 
 async function send() {
   const text = useAgent.getState().draft.trim();

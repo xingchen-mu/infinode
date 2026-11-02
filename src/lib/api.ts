@@ -118,6 +118,9 @@ export const api = {
     request<{ ok: true }>(`/api/agent/${projectId}`, json('POST', body)),
   abortAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}/abort`, { method: 'POST' }),
   clearAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}`, { method: 'DELETE' }),
+  /** What this page shows, for outside agents (MCP) to act on "the selected items". */
+  presence: (body: { projectId: string; selection: string[]; view: { x: number; y: number } }) =>
+    request<{ ok: true }>('/api/presence', json('PUT', body)),
   approveAgent: (projectId: string, id: string, ok: boolean) => request<{ ok: true }>(`/api/agent/${projectId}/approve`, json('POST', { id, ok })),
 };
 
@@ -127,6 +130,8 @@ export interface EventHandlers {
   onHello(data: { comfyOnline: boolean; active: Task[] }): void;
   onProject(e: ProjectEvent): void;
   onAgent(e: AgentEventData): void;
+  /** Items an outside agent just made, to bring into view. */
+  onReveal(e: { projectId: string; ids: string[] }): void;
   onConnection(ok: boolean): void;
 }
 
@@ -141,6 +146,7 @@ export function subscribeEvents(h: EventHandlers): () => void {
   es.addEventListener('comfy', (e) => h.onComfy(JSON.parse((e as MessageEvent).data).online));
   es.addEventListener('project', (e) => h.onProject(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('agent', (e) => h.onAgent(JSON.parse((e as MessageEvent).data)));
+  es.addEventListener('reveal', (e) => h.onReveal(JSON.parse((e as MessageEvent).data)));
   es.onerror = () => h.onConnection(false);
   return () => es.close();
 }
