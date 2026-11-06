@@ -1,6 +1,6 @@
 import type { CanvasItem } from '../../shared/types';
 import { IMAGE_LONG_SIDE, VIDEO_LONG_SIDE, inputIds } from './items';
-import { type Rect, displaySize } from '../../shared/geometry';
+import { type Rect, displaySize, intersects, visibleRect } from '../../shared/geometry';
 import { aspectValue } from '../generation/models';
 import { useStore } from '../store';
 import { t } from '../i18n';
@@ -118,20 +118,26 @@ export function Links({
   const items = useStore((s) => s.items);
   const selection = useStore((s) => s.selection);
   const zoom = useStore((s) => s.viewport.zoom);
+  const viewport = useStore((s) => s.viewport);
+  const screen = useStore((s) => s.screen);
   const showLinks = useStore((s) => s.showLinks);
   const pendingOutput = useStore((s) => s.pendingOutput);
   useStore((s) => s.composer); // slot size follows the composer settings
 
   const byId = new Map(items.map((i) => [i.id, i]));
   const selected = new Set(selection);
+  const view = visibleRect(viewport, screen.w, screen.h, 0.35);
   const views: LinkView[] = [];
 
   if (showLinks) {
     for (const out of items) {
       const ids = inputIds(out);
+      const outVisible = intersects(out, view) || selected.has(out.id) || hovered === out.id;
+      if (!outVisible && !ids.some((id) => selected.has(id) || hovered === id)) continue;
       ids.forEach((id, index) => {
         const input = byId.get(id);
         if (!input || input.id === out.id) return;
+        if (!intersects(input, view) && !selected.has(input.id) && !selected.has(out.id) && hovered !== input.id && hovered !== out.id) return;
         const p = linkPath(input, out);
         const focused = selected.has(out.id) || selected.has(id) || hovered === out.id || hovered === id;
         const state = out.error ? 'failed' : !out.asset ? 'pending' : focused ? 'active' : 'idle';

@@ -995,6 +995,86 @@ button.pill:hover {
   color: var(--text-2);
 }
 
+.canvas-search-pop {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 0;
+  width: min(320px, calc(100vw - 78px));
+  max-height: min(460px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.canvas-search-input {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-3);
+}
+
+.canvas-search-input svg {
+  width: 15px;
+  height: 15px;
+}
+
+.canvas-search-input input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.canvas-search-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  margin-top: 3px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.canvas-search-result:hover {
+  background: var(--panel-2);
+}
+
+.canvas-search-result b,
+.canvas-search-result small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-search-result b {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.canvas-search-result small,
+.canvas-search-empty {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.canvas-search-empty {
+  padding: 14px 8px 8px;
+  text-align: center;
+}
+
 /* ---------------------------------------------------------------- bottom panels */
 
 .panel {

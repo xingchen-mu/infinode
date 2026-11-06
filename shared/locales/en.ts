@@ -269,6 +269,11 @@ export const EN: Record<string, Translation> = {
   '显示连线 (L)': 'Show links (L)',
   快捷键: 'Shortcuts',
   快捷操作: 'Shortcuts',
+  搜索画布: 'Search canvas',
+  '搜索节点、提示词或文本': 'Search nodes, prompts or text',
+  没有找到匹配节点: 'No matching nodes',
+  没有提示词: 'No prompt',
+  媒体节点: 'Media node',
 
   // ---------------------------------------------------------------- details
   操作: 'Operation',

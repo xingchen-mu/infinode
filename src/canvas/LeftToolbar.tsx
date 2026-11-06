@@ -1,9 +1,9 @@
-import { Hand, HelpCircle, ImagePlus, MousePointer2, Scan, StickyNote, Workflow } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { Hand, HelpCircle, ImagePlus, MousePointer2, Scan, Search, StickyNote, Workflow } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { addFiles } from '../assets/actions';
 import { addNote } from './items';
-import { fitAll } from './view';
-import { setShowLinks, useStore } from '../store';
+import { ensureVisible, fitAll } from './view';
+import { select, setShowLinks, useStore } from '../store';
 import { t } from '../i18n';
 
 const SHORTCUTS: [string, string][] = [
@@ -30,6 +30,28 @@ export function LeftToolbar() {
   const showLinks = useStore((s) => s.showLinks);
   const input = useRef<HTMLInputElement>(null);
   const [help, setHelp] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchInput = useRef<HTMLInputElement>(null);
+  const items = useStore((s) => s.items);
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    return items.filter((item) => {
+      const prompt = item.request && 'prompt' in item.request ? item.request.prompt : '';
+      return `${item.name ?? ''} ${item.id} ${item.text ?? ''} ${prompt}`.toLowerCase().includes(q);
+    }).slice(0, 20);
+  }, [items, query]);
+  useEffect(() => {
+    if (searchOpen) requestAnimationFrame(() => searchInput.current?.focus());
+  }, [searchOpen]);
+  const jump = (id: string) => {
+    const item = useStore.getState().items.find((x) => x.id === id);
+    if (!item) return;
+    select([id]);
+    ensureVisible(item);
+    setSearchOpen(false);
+  };
   return (
     <div className="leftbar" data-ui>
       <button className={`tool ${tool === 'select' ? 'on' : ''}`} title={t('选择 (V)')} onClick={() => useStore.setState({ tool: 'select' })}>
@@ -47,6 +69,9 @@ export function LeftToolbar() {
       </button>
       <button className="tool" title={t('显示全部 (⇧1)')} onClick={fitAll}>
         <Scan />
+      </button>
+      <button className={`tool ${searchOpen ? 'on' : ''}`} title={t('搜索画布')} onClick={() => setSearchOpen((v) => !v)}>
+        <Search />
       </button>
       <button className={`tool ${showLinks ? 'on-soft' : ''}`} title={showLinks ? t('隐藏连线 (L)') : t('显示连线 (L)')} onClick={() => setShowLinks(!showLinks)}>
         <Workflow />
@@ -75,6 +100,18 @@ export function LeftToolbar() {
               <kbd>{k}</kbd>
               <span>{v}</span>
             </div>
+          ))}
+        </div>
+      )}
+      {searchOpen && (
+        <div className="canvas-search-pop" data-ui>
+          <div className="canvas-search-input"><Search /><input ref={searchInput} value={query} placeholder={t('搜索节点、提示词或文本')} onChange={(e) => setQuery(e.target.value)} /></div>
+          {query.trim() && !results.length && <div className="canvas-search-empty">{t('没有找到匹配节点')}</div>}
+          {results.map((item) => (
+            <button key={item.id} className="canvas-search-result" onClick={() => jump(item.id)}>
+              <b>{item.name || item.id}</b>
+              <small>{item.kind === 'text' ? item.text || t('空文本') : item.request && 'prompt' in item.request ? item.request.prompt || t('没有提示词') : t('媒体节点')}</small>
+            </button>
           ))}
         </div>
       )}
