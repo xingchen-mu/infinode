@@ -2,9 +2,11 @@ import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const isDev = process.env.INFINODE_DESKTOP_DEV === '1';
 const devUrl = process.env.INFINODE_DEV_URL || 'http://127.0.0.1:5173';
+const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let backend;
 let backendUrl;
 let quitting = false;
@@ -14,7 +16,8 @@ function freePort() {
     const server = createServer();
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const port = server.localPort;
+      const address = server.address();
+      const port = address && typeof address === 'object' ? address.port : 0;
       server.close();
       if (port) resolve(port);
       else reject(new Error('无法分配本地端口'));
@@ -38,13 +41,13 @@ async function waitForServer(url, child) {
 }
 
 function runtimePath(...parts) {
-  if (!app.isPackaged) return path.join(app.getAppPath(), ...parts);
+  if (!app.isPackaged) return path.join(sourceRoot, ...parts);
   return path.join(process.resourcesPath, 'app.asar.unpacked', ...parts);
 }
 
 async function startBackend() {
   const port = await freePort();
-  const appPath = app.getAppPath();
+  const appPath = app.isPackaged ? app.getAppPath() : sourceRoot;
   const dataDir = path.join(app.getPath('userData'), 'data');
   const envFile = path.join(app.getPath('userData'), '.env');
   const runner = runtimePath('node_modules', 'tsx', 'dist', 'cli.mjs');
