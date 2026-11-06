@@ -233,6 +233,12 @@ export interface Settings {
   commercialOnly?: boolean;
   /** Interface language of the page that last opened Infinode: the server's messages and the assistant follow it. */
   language?: Lang;
+  /** Canvas assistant model settings. The API key itself is never returned. */
+  agentModel?: string;
+  agentBaseUrl?: string;
+  agentVision?: boolean;
+  agentThinking?: string;
+  agentApiKeyConfigured?: boolean;
 }
 
 /** Text items hold notes such as a script or a shot list. */

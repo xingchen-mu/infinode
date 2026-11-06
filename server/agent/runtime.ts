@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
   type Api,
+  type ApiKeyAuth,
   type AssistantMessage,
   type ImageContent,
   type Model,
@@ -15,7 +16,6 @@ import {
   Type,
   clampThinkingLevel,
   createProvider,
-  envApiKeyAuth,
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
@@ -23,6 +23,7 @@ import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage, AgentView, Ca
 import { type Lang, type Vars, msg } from '../../shared/i18n.ts';
 import { config } from '../config.ts';
 import { serverLang, t } from '../i18n.ts';
+import type { SettingsStore } from '../settings.ts';
 import { RequestError } from '../workflows/index.ts';
 import { type CanvasDeps, ResultWriter, describeItem, readBoard } from './board.ts';
 import { SUMMARY_PROMPT, commercialRules, languageRule, systemPrompt } from './prompt.ts';
@@ -88,7 +89,7 @@ interface ToolDetails {
 const ACTIVE = new Set(['queued', 'running']);
 
 /** AGENT_BASE_URL: any OpenAI-compatible endpoint (豆包、百炼、Ollama、vLLM…), with AGENT_MODEL naming the model there. */
-function customProvider(baseUrl: string, modelId: string): Provider {
+function customProvider(baseUrl: string, modelId: string, apiKey: string | undefined, vision: boolean): Provider {
   const model: Model<'openai-completions'> = {
     id: modelId,
     name: modelId,
@@ -96,7 +97,7 @@ function customProvider(baseUrl: string, modelId: string): Provider {
     provider: 'custom',
     baseUrl,
     reasoning: false,
-    input: process.env.AGENT_VISION === '1' ? ['text', 'image'] : ['text'],
+    input: vision ? ['text', 'image'] : ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 8192,
@@ -105,7 +106,15 @@ function customProvider(baseUrl: string, modelId: string): Provider {
     id: 'custom',
     name: modelId,
     baseUrl,
-    auth: { apiKey: envApiKeyAuth('API key', ['AGENT_API_KEY']) },
+    auth: {
+      apiKey: {
+        name: 'API key',
+        resolve: async ({ signal }) => {
+          signal.throwIfAborted();
+          return apiKey ? { auth: { apiKey }, source: 'settings' } : undefined;
+        },
+      } satisfies ApiKeyAuth,
+    },
     models: [model],
     api: openAICompletionsApi(),
   });
@@ -182,7 +191,7 @@ function assistantEntry(m: AssistantMessage): AgentEntry | undefined {
 
 /** Lets the canvas agent run on any pi-ai model; one conversation per board. */
 export class AgentHub {
-  private state: Omit<AgentStatus, 'reason'> & { issue?: [string, Vars?] };
+  private state!: Omit<AgentStatus, 'reason'> & { issue?: [string, Vars?] };
 
   /** Whether the assistant can run, with the reason in the server's current language. */
   get status(): AgentStatus {
@@ -197,39 +206,61 @@ export class AgentHub {
   private readonly watchFile: string;
   /** Context size (tokens of the last request) at which the early conversation is condensed. */
   private readonly compactAt: number;
-  private readonly models: Models;
-  private readonly model?: Model<Api>;
-  private readonly thinking: ThinkingLevel;
+  private models: Models;
+  private model?: Model<Api>;
+  private thinking!: ThinkingLevel;
+  private vision = false;
   private readonly tools: CanvasTool[];
   private readonly labels: Map<string, CanvasTool>;
+  private readonly opts: { models?: Models; model?: string; compactAt?: number };
+  private readonly settings?: SettingsStore;
 
   constructor(
     private readonly deps: CanvasDeps,
     private readonly emit: (e: AgentEventData) => void,
     /** For tests: another model collection and "provider/model", and when to condense. */
     opts: { models?: Models; model?: string; compactAt?: number } = {},
+    settings?: SettingsStore,
   ) {
+    this.opts = opts;
+    this.settings = settings;
     this.watchFile = join(this.dir, 'watches.json');
-    const models = builtinModels();
-    let name = opts.model ?? (process.env.AGENT_MODEL?.trim() || DEFAULT_MODEL);
-    const baseUrl = process.env.AGENT_BASE_URL?.trim();
-    if (baseUrl && !opts.models && process.env.AGENT_MODEL?.trim()) {
-      models.setProvider(customProvider(baseUrl, name));
+    this.models = opts.models ?? builtinModels();
+    this.tools = canvasTools(deps, new ResultWriter(deps));
+    this.labels = new Map(this.tools.map((t) => [t.name, t]));
+    this.compactAt = opts.compactAt ?? 100_000;
+    this.configureModel();
+    deps.tasks.on('task', (t: Task) => this.onTask(t));
+    this.setModelState();
+  }
+
+  private configureModel() {
+    const cfg = this.settings?.agentConfig() ?? {
+      model: this.opts.model ?? (process.env.AGENT_MODEL?.trim() || DEFAULT_MODEL),
+      baseUrl: process.env.AGENT_BASE_URL?.trim() || undefined,
+      apiKey: process.env.AGENT_API_KEY?.trim() || undefined,
+      vision: process.env.AGENT_VISION === '1',
+      thinking: process.env.AGENT_THINKING?.trim() || 'low',
+    };
+    const models = this.opts.models ?? builtinModels();
+    let name = cfg.model;
+    if (cfg.baseUrl && !this.opts.models) {
+      (models as ReturnType<typeof builtinModels>).setProvider(customProvider(cfg.baseUrl, name, cfg.apiKey, cfg.vision));
       name = `custom/${name}`;
     }
-    this.models = opts.models ?? models;
+    this.models = models;
     const slash = name.indexOf('/');
     this.model = slash > 0 ? this.models.getModel(name.slice(0, slash), name.slice(slash + 1)) : undefined;
-    const vision = Boolean(this.model?.input.includes('image'));
-    const wanted = (process.env.AGENT_THINKING?.trim() || 'low') as ThinkingLevel;
+    this.vision = Boolean(this.model?.input.includes('image'));
+    const wanted = cfg.thinking as ThinkingLevel;
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
-    this.tools = canvasTools(deps, new ResultWriter(deps)).filter((t) => vision || !t.vision);
-    this.labels = new Map(this.tools.map((t) => [t.name, t]));
-    this.compactAt = opts.compactAt ?? Math.min(100_000, Math.floor((this.model?.contextWindow ?? 128_000) / 2));
-    deps.tasks.on('task', (t: Task) => this.onTask(t));
+  }
+
+  private setModelState() {
+    const name = this.model ? `${this.model.provider}/${this.model.id}` : this.settings?.agentConfig().model ?? this.opts.model ?? (process.env.AGENT_MODEL?.trim() || DEFAULT_MODEL);
     this.state = this.model
-      ? { ready: false, model: name, vision, issue: [msg('正在检查模型配置')] }
-      : { ready: false, model: name, vision, issue: [msg('找不到模型 {name}：AGENT_MODEL 的格式是 provider/model，比如 {example}'), { name, example: DEFAULT_MODEL }] };
+      ? { ready: false, model: name, vision: this.vision, issue: [msg('正在检查模型配置')] }
+      : { ready: false, model: name, vision: this.vision, issue: [msg('找不到模型 {name}：AGENT_MODEL 的格式是 provider/model，比如 {example}'), { name, example: DEFAULT_MODEL }] };
   }
 
   async init() {
@@ -242,12 +273,34 @@ export class AgentHub {
     // Batches that finished while the server was down.
     setTimeout(() => this.checkWatches(), 3000);
     if (!this.model) return;
+    await this.refreshAuth();
+  }
+
+  /** Apply settings immediately. Existing conversations are reopened from disk with the new model. */
+  async reconfigure() {
+    for (const s of this.live.values()) {
+      s.agent.clearAllQueues();
+      s.agent.abort();
+      await s.done?.catch(() => {});
+    }
+    this.sessions.clear();
+    this.live.clear();
+    this.configureModel();
+    this.setModelState();
+    await this.refreshAuth();
+  }
+
+  private async refreshAuth() {
+    if (!this.model) return;
     const auth = await this.models.checkAuth(this.model.provider).catch(() => undefined);
+    const keylessCustom = this.model.provider === 'custom' && !this.settings?.agentConfig().apiKey && !process.env.AGENT_API_KEY?.trim();
     const env = this.model.provider === 'custom' ? 'AGENT_API_KEY' : `${this.model.provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY`;
     Object.assign(
       this.state,
       auth
         ? { ready: true, issue: undefined }
+        : keylessCustom
+          ? { ready: true, issue: undefined }
         : { ready: false, issue: [msg('还没有配置 {provider} 的 API key：在项目根目录的 .env 里加一行 {env}=你的key，然后重启服务'), { provider: this.model.provider, env }] },
     );
   }
@@ -409,7 +462,7 @@ export class AgentHub {
         systemPrompt: systemPrompt(this.state.vision, commercial, s.lang),
         model: this.model,
         thinkingLevel: this.thinking,
-        tools: this.tools.map((def) => this.agentTool(def, s)),
+        tools: this.tools.filter((def) => this.vision || !def.vision).map((def) => this.agentTool(def, s)),
         messages,
       },
       streamFn: (model, context, options) => this.models.streamSimple(model, context, options),

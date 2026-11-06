@@ -28,7 +28,14 @@ export function SettingsModal() {
   const [url, setUrl] = useState('');
   const [saved, setSaved] = useState('');
   const [commercial, setCommercial] = useState(false);
-  const [busy, setBusy] = useState<'test' | 'save' | 'license' | null>(null);
+  const [agentModel, setAgentModel] = useState('');
+  const [agentBaseUrl, setAgentBaseUrl] = useState('');
+  const [agentApiKey, setAgentApiKey] = useState('');
+  const [agentKeyConfigured, setAgentKeyConfigured] = useState(false);
+  const [agentVision, setAgentVision] = useState(false);
+  const [agentThinking, setAgentThinking] = useState('low');
+  const [agentSaved, setAgentSaved] = useState('');
+  const [busy, setBusy] = useState<'test' | 'save' | 'license' | 'agent' | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
@@ -36,6 +43,12 @@ export function SettingsModal() {
       setUrl(s.comfyUrl);
       setSaved(s.comfyUrl);
       setCommercial(Boolean(s.commercialOnly));
+      setAgentModel(s.agentModel ?? '');
+      setAgentBaseUrl(s.agentBaseUrl ?? '');
+      setAgentKeyConfigured(Boolean(s.agentApiKeyConfigured));
+      setAgentVision(Boolean(s.agentVision));
+      setAgentThinking(s.agentThinking ?? 'low');
+      setAgentSaved(JSON.stringify([s.agentModel ?? '', s.agentBaseUrl ?? '', Boolean(s.agentVision), s.agentThinking ?? 'low', Boolean(s.agentApiKeyConfigured)]));
     });
   }, []);
 
@@ -88,6 +101,34 @@ export function SettingsModal() {
     location.reload();
   };
 
+  const saveAgent = async (clearApiKey = false) => {
+    setBusy('agent');
+    try {
+      const r = await api.saveSettings({
+        agentModel,
+        agentBaseUrl,
+        agentVision,
+        agentThinking,
+        ...(agentApiKey.trim() ? { agentApiKey: agentApiKey.trim() } : {}),
+        ...(clearApiKey ? { clearAgentApiKey: true } : {}),
+      });
+      setAgentModel(r.settings.agentModel ?? '');
+      setAgentBaseUrl(r.settings.agentBaseUrl ?? '');
+      setAgentVision(Boolean(r.settings.agentVision));
+      setAgentThinking(r.settings.agentThinking ?? 'low');
+      setAgentKeyConfigured(Boolean(r.settings.agentApiKeyConfigured));
+      setAgentApiKey('');
+      setAgentSaved(JSON.stringify([r.settings.agentModel ?? '', r.settings.agentBaseUrl ?? '', Boolean(r.settings.agentVision), r.settings.agentThinking ?? 'low', Boolean(r.settings.agentApiKeyConfigured)]));
+      toast(t('画布助手配置已保存'), 'success');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const agentDirty = JSON.stringify([agentModel, agentBaseUrl, agentVision, agentThinking, agentKeyConfigured || Boolean(agentApiKey)]) !== agentSaved;
+
   const builtins = Object.keys(BUILTIN_NAMES);
   return (
     <Modal title={t('设置')} onClose={close}>
@@ -133,6 +174,23 @@ export function SettingsModal() {
             <code>npm run dev</code>,
           ])}
         </div>
+      </section>
+
+      <section className="m-section">
+        <div className="m-label">{t('画布助手模型')}</div>
+        <div className="m-help">{t('可接入任意 OpenAI 兼容接口，例如 DeepSeek、OpenRouter、Ollama 或局域网模型。留空则继续使用 .env 配置。')}</div>
+        <input className="m-input" value={agentModel} placeholder={t('deepseek/deepseek-flash 或 llama3.1')} spellCheck={false} onChange={(e) => setAgentModel(e.target.value)} />
+        <input className="m-input" value={agentBaseUrl} placeholder={t('https://api.deepseek.com/v1（自定义接口地址）')} spellCheck={false} onChange={(e) => setAgentBaseUrl(e.target.value)} />
+        <input className="m-input" type="password" value={agentApiKey} placeholder={agentKeyConfigured ? t('API key 已配置，留空保持不变') : t('API key（本地模型可留空）')} autoComplete="off" onChange={(e) => setAgentApiKey(e.target.value)} />
+        <div className="m-row">
+          <label className="m-check"><input type="checkbox" checked={agentVision} onChange={(e) => setAgentVision(e.target.checked)} /><span>{t('启用视觉输入')}</span></label>
+          <label className="m-help">{t('思考')} <select value={agentThinking} onChange={(e) => setAgentThinking(e.target.value)}><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+        </div>
+        <div className="m-row">
+          <button className="btn primary" onClick={() => void saveAgent()} disabled={!agentDirty || busy !== null}>{busy === 'agent' ? <Loader2 className="spin" /> : null}{t('保存助手配置')}</button>
+          {agentKeyConfigured && <button className="btn ghost" onClick={() => void saveAgent(true)} disabled={busy !== null}>{t('清除 API key')}</button>}
+        </div>
+        <div className="m-help">{t('API key 只保存在本机应用数据中，不会通过设置接口返回。保存后立即对新的助手对话生效。')}</div>
       </section>
 
       <section className="m-section">

@@ -16,6 +16,14 @@ import type {
 import { t } from '../i18n';
 
 export type WorkflowData = Omit<CustomWorkflow, 'id' | 'createdAt' | 'updatedAt'>;
+export type AgentSettingsPatch = {
+  agentModel?: string;
+  agentBaseUrl?: string;
+  agentApiKey?: string;
+  clearAgentApiKey?: boolean;
+  agentVision?: boolean;
+  agentThinking?: string;
+};
 
 /** Identifies this tab's own board saves, so their change events are not merged back in. */
 export const clientId = `tab-${crypto.randomUUID().slice(0, 8)}`;
@@ -100,7 +108,7 @@ export const api = {
   deleteProject: (id: string) => request<{ ok: true }>(`/api/projects/${id}`, { method: 'DELETE' }),
 
   settings: () => request<Settings>('/api/settings'),
-  saveSettings: (patch: Partial<Settings>) =>
+  saveSettings: (patch: Partial<Settings> & AgentSettingsPatch) =>
     request<{ settings: Settings; capabilities: Capabilities }>('/api/settings', json('PUT', patch)),
   testComfy: (comfyUrl: string) =>
     request<{ ok: boolean; url?: string; version?: string; gpu?: string; error?: string }>('/api/settings/test', json('POST', { comfyUrl })),

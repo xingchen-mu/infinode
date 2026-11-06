@@ -158,6 +158,29 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     assert.equal(settings.status, 200);
     assert.equal((await settings.json()).capabilities.comfyOnline, false);
     assert.equal(JSON.parse(await readFile(join(dataDir, 'settings.json'), 'utf8')).commercialOnly, true);
+    const customSettings = await request('/api/settings', 'PUT', {
+      agentModel: 'local-chat',
+      agentBaseUrl: 'http://127.0.0.1:11434/v1/',
+      agentApiKey: 'route-test-secret',
+      agentVision: true,
+      agentThinking: 'medium',
+    });
+    assert.equal(customSettings.status, 200);
+    const publicSettings = await (await request('/api/settings')).json();
+    assert.equal(publicSettings.agentModel, 'local-chat');
+    assert.equal(publicSettings.agentBaseUrl, 'http://127.0.0.1:11434/v1');
+    assert.equal(publicSettings.agentApiKeyConfigured, true);
+    assert.equal('agentApiKey' in publicSettings, false);
+    const customStatus = await (await request('/api/agent/status')).json();
+    assert.equal(customStatus.model, 'custom/local-chat');
+    assert.equal(customStatus.vision, true);
+    assert.equal(customStatus.ready, true);
+    const savedSettings = JSON.parse(await readFile(join(dataDir, 'settings.json'), 'utf8'));
+    assert.equal(savedSettings.agentApiKey, 'route-test-secret');
+    const cleared = await request('/api/settings', 'PUT', { clearAgentApiKey: true });
+    assert.equal(cleared.status, 200);
+    assert.equal((await (await request('/api/settings')).json()).agentApiKeyConfigured, false);
+    assert.equal('agentApiKey' in JSON.parse(await readFile(join(dataDir, 'settings.json'), 'utf8')), false);
     const blocked = await request('/api/tasks', 'POST', { request: { op: 'image.generate', model: 'qwen', prompt: 'test' } });
     assert.equal(blocked.status, 400);
     assert.match((await blocked.json()).error, /commercial/i);

@@ -94,7 +94,7 @@ npm run desktop:dev
 npm run desktop:dist
 ```
 
-`desktop:dist` 会按当前系统生成安装包；在 macOS、Windows 或 Linux 上分别运行即可生成对应平台的包。桌面端仍然连接你配置的本机、局域网或远程 ComfyUI。画布助手使用的 API 配置可放在应用数据目录的 `.env` 文件中；命令行启动方式仍使用项目根目录的 `.env`。
+`desktop:dist` 会按当前系统生成安装包；在 macOS、Windows 或 Linux 上分别运行即可生成对应平台的包。桌面端仍然连接你配置的本机、局域网或远程 ComfyUI。画布助手的 API 配置可以直接在「设置 → 画布助手模型」中填写；命令行启动也可以继续使用项目根目录的 `.env`。
 
 ### 产品网站
 
@@ -140,7 +140,7 @@ Infinode 的后端只监听本机（`127.0.0.1:8787`）。想让局域网里的�
 
 ### 配置
 
-助手用的是你自己的大模型 API key，在项目根目录的 `.env` 里配置，然后重启 `npm run dev`：
+助手用的是你自己的大模型 API key。推荐在「设置 → 画布助手模型」里填写模型 ID、OpenAI 兼容接口地址、API key、视觉输入和思考等级，保存后立即对新的对话生效。API key 只保存在本机应用数据中，不会通过设置接口返回。也可以在项目根目录的 `.env` 里配置，然后重启 `npm run dev`：
 
 ```bash
 DEEPSEEK_API_KEY=sk-...                   # 默认模型 deepseek/deepseek-flash（能看图）

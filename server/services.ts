@@ -59,7 +59,7 @@ export async function createServices() {
     changed: (p: Project) => projectEvents.emit({ id: p.id, updatedAt: p.updatedAt, by: 'agent' }),
     commercialOnly: () => Boolean(settings.value.commercialOnly),
   };
-  const agent = new AgentHub(canvasDeps, (e) => agentEvents.emit(e));
+  const agent = new AgentHub(canvasDeps, (e) => agentEvents.emit(e), {}, settings);
   const mcp = new CanvasMcp(canvasDeps, () => presence, (projectId, ids) => revealEvents.emit({ projectId, ids }), process.env.npm_package_version ?? 'dev');
   await agent.init();
   return {

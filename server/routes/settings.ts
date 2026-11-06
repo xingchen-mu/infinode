@@ -6,7 +6,7 @@ import { RequestError } from '../workflows/index.ts';
 import { t } from '../i18n.ts';
 import type { Services } from '../services.ts';
 
-export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, capabilities }: Pick<Services, 'settings' | 'comfy' | 'assets' | 'capabilities'>) {
+export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, capabilities, agent }: Pick<Services, 'settings' | 'comfy' | 'assets' | 'capabilities' | 'agent'>) {
   app.get('/api/settings', (c) => c.json(settings.value));
 
   /** Checks an address without saving it. */
@@ -28,7 +28,17 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
   });
 
   app.put('/api/settings', async (c) => {
-    const body = await c.req.json<{ comfyUrl?: string; commercialOnly?: boolean; language?: unknown }>();
+    const body = await c.req.json<{
+      comfyUrl?: string;
+      commercialOnly?: boolean;
+      language?: unknown;
+      agentModel?: string;
+      agentBaseUrl?: string;
+      agentApiKey?: string;
+      clearAgentApiKey?: boolean;
+      agentVision?: boolean;
+      agentThinking?: string;
+    }>();
     if (isLang(body.language) && body.language !== settings.value.language) {
       await settings.save({ language: body.language });
       capabilities.invalidate(); // its notes are in the old language
@@ -50,6 +60,31 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         comfy.setBaseUrl(url);
         capabilities.invalidate();
       }
+    }
+    const agentChanged = body.agentModel !== undefined || body.agentBaseUrl !== undefined || body.agentApiKey !== undefined || body.clearAgentApiKey === true || body.agentVision !== undefined || body.agentThinking !== undefined;
+    if (agentChanged) {
+      let baseUrl: string | undefined;
+      if (body.agentBaseUrl !== undefined) {
+        const input = body.agentBaseUrl.trim();
+        if (input) {
+          try {
+            const u = new URL(input);
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(t('只支持 http / https 地址'));
+            baseUrl = `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+          } catch (err) {
+            throw new RequestError(t('地址格式不对：{message}', { message: (err as Error).message }));
+          }
+        } else baseUrl = '';
+      }
+      await settings.saveAgentConfig({
+        model: body.agentModel,
+        baseUrl,
+        apiKey: body.agentApiKey,
+        clearApiKey: body.clearAgentApiKey,
+        vision: typeof body.agentVision === 'boolean' ? body.agentVision : undefined,
+        thinking: body.agentThinking,
+      });
+      await agent.reconfigure();
     }
     return c.json({ settings: settings.value, capabilities: await capabilities.get(true) });
   });
