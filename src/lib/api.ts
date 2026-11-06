@@ -7,6 +7,7 @@ import type {
   CustomWorkflow,
   PresetInfo,
   Project,
+  ProjectSnapshotSummary,
   ProjectSummary,
   Settings,
   Task,
@@ -107,6 +108,10 @@ export const api = {
     });
   },
   deleteProject: (id: string) => request<{ ok: true }>(`/api/projects/${id}`, { method: 'DELETE' }),
+  projectSnapshots: (id: string) => request<ProjectSnapshotSummary[]>(`/api/projects/${id}/snapshots`),
+  createSnapshot: (id: string, name?: string) => request<ProjectSnapshotSummary>(`/api/projects/${id}/snapshots`, json('POST', { name })),
+  restoreSnapshot: (id: string, snapshotId: string) => request<Project>(`/api/projects/${id}/snapshots/${encodeURIComponent(snapshotId)}/restore`, { method: 'POST' }),
+  branchProject: (id: string, snapshotId: string, name?: string) => request<Project>(`/api/projects/${id}/branches`, json('POST', { snapshotId, name })),
 
   settings: () => request<Settings>('/api/settings'),
   saveSettings: (patch: Partial<Settings> & AgentSettingsPatch) =>

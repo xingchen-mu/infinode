@@ -295,6 +295,14 @@ export interface ProjectSummary {
   cover?: string;
 }
 
+export interface ProjectSnapshotSummary {
+  id: string;
+  projectId: string;
+  name: string;
+  createdAt: number;
+  itemCount: number;
+}
+
 // ------------------------------------------------------------------ canvas agent
 
 /** One row of the agent panel's conversation. */

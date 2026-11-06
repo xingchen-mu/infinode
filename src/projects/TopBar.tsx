@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Cloud, CloudOff, Images, Loader2, Minus, Plus, Puzzle, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Cloud, CloudOff, History, Images, Loader2, Minus, Plus, Puzzle, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { thumbUrl } from '../../shared/media';
 import type { ProjectSummary, Task } from '../../shared/types';
@@ -65,6 +65,7 @@ function ProjectMenu() {
           >
             <Plus /> {t('新建画布')}
           </button>
+          {projectId && <button className="menu-item" onClick={() => { setOpen(false); useStore.setState({ modal: { type: 'snapshots' } }); }}><History /> {t('项目快照')}</button>}
           <div className="menu-sep" />
           {list.map((p) => (
             <div key={p.id} className={`project-row ${p.id === projectId ? 'on' : ''}`}>

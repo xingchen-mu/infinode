@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
-import type { CanvasItem, Project, ProjectSummary } from '../../shared/types.ts';
+import type { CanvasItem, Project, ProjectSnapshotSummary, ProjectSummary } from '../../shared/types.ts';
 import { config } from '../config.ts';
 import { t } from '../i18n.ts';
 
@@ -20,8 +20,14 @@ export interface ItemsPatch {
   remove?: string[];
 }
 
+interface ProjectSnapshot extends ProjectSnapshotSummary {
+  items: CanvasItem[];
+  viewport: Project['viewport'];
+}
+
 export class ProjectStore {
   private readonly dir = join(config.dataDir, 'projects');
+  private readonly snapshotsDir = join(config.dataDir, 'snapshots');
   private readonly locks = new Map<string, Promise<unknown>>();
 
   /** Read-modify-write on one board runs one at a time. */
@@ -37,6 +43,7 @@ export class ProjectStore {
 
   async init() {
     await mkdir(this.dir, { recursive: true });
+    await mkdir(this.snapshotsDir, { recursive: true });
   }
 
   private file(id: string) {
@@ -72,6 +79,73 @@ export class ProjectStore {
     const p: Project = { id: nanoid(10), name, items: [], viewport: { x: 0, y: 0, zoom: 1 }, createdAt: now, updatedAt: now };
     await this.write(p);
     return p;
+  }
+
+  async listSnapshots(projectId: string): Promise<ProjectSnapshotSummary[]> {
+    const dir = this.snapshotProjectDir(projectId);
+    try {
+      const names = (await readdir(dir)).filter((n) => n.endsWith('.json'));
+      const out: ProjectSnapshotSummary[] = [];
+      for (const name of names) {
+        try {
+          const snapshot = JSON.parse(await readFile(join(dir, name), 'utf8')) as ProjectSnapshot;
+          out.push({ id: snapshot.id, projectId: snapshot.projectId, name: snapshot.name, createdAt: snapshot.createdAt, itemCount: snapshot.itemCount });
+        } catch {
+          /* skip unreadable snapshots */
+        }
+      }
+      return out.sort((a, b) => b.createdAt - a.createdAt);
+    } catch {
+      return [];
+    }
+  }
+
+  async createSnapshot(projectId: string, name = t('未命名快照')): Promise<ProjectSnapshotSummary | undefined> {
+    return this.exclusive(projectId, async () => {
+      const project = await this.get(projectId);
+      if (!project) return undefined;
+      const snapshot: ProjectSnapshot = {
+        id: nanoid(10),
+        projectId,
+        name: name.trim().slice(0, 80) || t('未命名快照'),
+        createdAt: Date.now(),
+        itemCount: project.items.length,
+        items: project.items,
+        viewport: project.viewport,
+      };
+      await mkdir(this.snapshotProjectDir(projectId), { recursive: true });
+      await writeFile(this.snapshotFile(projectId, snapshot.id), JSON.stringify(snapshot));
+      return { id: snapshot.id, projectId, name: snapshot.name, createdAt: snapshot.createdAt, itemCount: snapshot.itemCount };
+    });
+  }
+
+  async restoreSnapshot(projectId: string, snapshotId: string): Promise<Project | undefined> {
+    return this.exclusive(projectId, async () => {
+      const project = await this.get(projectId);
+      const snapshot = await this.readSnapshot(projectId, snapshotId);
+      if (!project || !snapshot) return undefined;
+      project.items = snapshot.items;
+      project.viewport = snapshot.viewport;
+      return this.touch(project);
+    });
+  }
+
+  async branch(projectId: string, snapshotId: string, name?: string): Promise<Project | undefined> {
+    return this.exclusive(projectId, async () => {
+      const snapshot = await this.readSnapshot(projectId, snapshotId);
+      if (!snapshot) return undefined;
+      const now = Date.now();
+      const project: Project = {
+        id: nanoid(10),
+        name: name?.trim().slice(0, 80) || `${snapshot.name} · ${t('分支')}`,
+        items: snapshot.items,
+        viewport: snapshot.viewport,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await this.write(project);
+      return project;
+    });
   }
 
   /** `base`: the updatedAt the writer last saw; a newer board is a conflict instead of being overwritten. */
@@ -111,6 +185,7 @@ export class ProjectStore {
 
   async remove(id: string) {
     await rm(this.file(id), { force: true });
+    await rm(this.snapshotProjectDir(id), { recursive: true, force: true });
   }
 
   private async write(p: Project) {
@@ -118,5 +193,23 @@ export class ProjectStore {
     const tmp = `${file}.${nanoid(4)}.tmp`;
     await writeFile(tmp, JSON.stringify(p));
     await rename(tmp, file);
+  }
+
+  private snapshotProjectDir(projectId: string) {
+    if (!ID.test(projectId)) throw new Error('invalid project id');
+    return join(this.snapshotsDir, projectId);
+  }
+
+  private snapshotFile(projectId: string, snapshotId: string) {
+    if (!ID.test(snapshotId)) throw new Error('invalid snapshot id');
+    return join(this.snapshotProjectDir(projectId), `${snapshotId}.json`);
+  }
+
+  private async readSnapshot(projectId: string, snapshotId: string): Promise<ProjectSnapshot | undefined> {
+    try {
+      return JSON.parse(await readFile(this.snapshotFile(projectId, snapshotId), 'utf8')) as ProjectSnapshot;
+    } catch {
+      return undefined;
+    }
   }
 }

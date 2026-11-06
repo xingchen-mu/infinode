@@ -1774,6 +1774,37 @@ textarea::placeholder {
   user-select: text;
 }
 
+.snapshot-list {
+  gap: 12px;
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.snapshot-meta {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snapshot-meta b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-meta small {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
 /* ---------------------------------------------------------------- asset library */
 
 .asset-library {

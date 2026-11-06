@@ -108,6 +108,20 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
       const saved: Project = JSON.parse(await readFile(join(dataDir, 'projects', `${project.id}.json`), 'utf8'));
       assert.equal(saved.name, 'Renamed');
       assert.equal(saved.items[0].text, 'Saved note');
+      const snapshot = await request(`/api/projects/${project.id}/snapshots`, 'POST', { name: 'Before branch' });
+      assert.equal(snapshot.status, 200);
+      const snapshotInfo = await snapshot.json();
+      assert.equal(snapshotInfo.itemCount, 1);
+      assert.equal((await (await request(`/api/projects/${project.id}/snapshots`)).json()).length, 1);
+      await request(`/api/projects/${project.id}/items`, 'PATCH', { upsert: [{ id: 'second-note', kind: 'text', x: 300, y: 20, w: 200, h: 100, text: 'Later note', createdAt: Date.now() }] });
+      const restored = await request(`/api/projects/${project.id}/snapshots/${snapshotInfo.id}/restore`, 'POST');
+      assert.equal(restored.status, 200);
+      assert.equal((await restored.json()).items.length, 1);
+      const branch = await request(`/api/projects/${project.id}/branches`, 'POST', { snapshotId: snapshotInfo.id, name: 'Branch copy' });
+      assert.equal(branch.status, 200);
+      const branchProject = await branch.json();
+      assert.notEqual(branchProject.id, project.id);
+      assert.equal(branchProject.name, 'Branch copy');
       assert.equal((await request(`/api/projects/${project.id}`, 'DELETE')).status, 200);
       assert.equal((await request(`/api/projects/${project.id}`)).status, 404);
     } finally {

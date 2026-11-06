@@ -15,6 +15,24 @@ export function registerProjectsRoutes(app: Hono, { projects, agent, projectEven
     const p = await projects.get(c.req.param('id'));
     return p ? c.json(p) : c.json({ error: t('画布不存在') }, 404);
   });
+  app.get('/api/projects/:id/snapshots', async (c) => c.json(await projects.listSnapshots(c.req.param('id'))));
+  app.post('/api/projects/:id/snapshots', async (c) => {
+    const body = await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string });
+    const snapshot = await projects.createSnapshot(c.req.param('id'), body.name);
+    return snapshot ? c.json(snapshot) : c.json({ error: t('画布不存在') }, 404);
+  });
+  app.post('/api/projects/:id/snapshots/:snapshotId/restore', async (c) => {
+    const project = await projects.restoreSnapshot(c.req.param('id'), c.req.param('snapshotId'));
+    if (!project) return c.json({ error: t('快照不存在') }, 404);
+    projectEvents.emit({ id: project.id, updatedAt: project.updatedAt, by: writer(c) });
+    return c.json(project);
+  });
+  app.post('/api/projects/:id/branches', async (c) => {
+    const body = await c.req.json<{ snapshotId?: string; name?: string }>();
+    if (typeof body.snapshotId !== 'string') throw new RequestError(t('请求格式错误'));
+    const project = await projects.branch(c.req.param('id'), body.snapshotId, body.name);
+    return project ? c.json(project) : c.json({ error: t('快照不存在') }, 404);
+  });
   /** Who made a change: the page's per-tab id, or "external" for scripts and agents. */
   const writer = (c: { req: { header(name: string): string | undefined } }) => (c.req.header('x-infinode-client') ?? 'external').slice(0, 64);
 
