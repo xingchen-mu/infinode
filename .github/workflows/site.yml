@@ -3,6 +3,10 @@ name: Deploy website
 on:
   push:
     branches: [main]
+    paths:
+      - 'site/**'
+      - 'docs/media/**'
+      - 'scripts/build-site.mjs'
   workflow_dispatch:
 
 permissions:
