@@ -109,6 +109,34 @@ test('a tool call edits the board, and the conversation survives a restart', asy
   assert.equal(reloaded.usage.tokens, view.usage.tokens);
 });
 
+test('the assistant can require approval before every canvas write', async () => {
+  const board = await projects.create('approval mode');
+  const tasks = fakeTasks();
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'faux-approval', input: ['text'], contextWindow: 200_000 }] });
+  faux.setResponses([fauxAssistantMessage(fauxToolCall('write_note', { title: '待确认', content: '不会未经确认写入' })), say('已等待确认')]);
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const deps = {
+    projects,
+    tasks,
+    assets,
+    workflows: () => [],
+    capabilities: async () => ({ comfyOnline: true, comfyUrl: '', features: {}, models: {} }),
+    changed: () => {},
+    commercialOnly: () => false,
+  } as unknown as ConstructorParameters<typeof AgentHub>[0];
+  const settings = { agentConfig: () => ({ model: 'faux/faux-approval', vision: false, thinking: 'low', approvalMode: 'always' as const }) } as ConstructorParameters<typeof AgentHub>[3];
+  const hub = new AgentHub(deps, () => {}, { models, model: 'faux/faux-approval' }, settings);
+  await hub.init();
+  await hub.send(board.id, { text: '写一个备注' });
+  const waiting = await settled(hub, board.id);
+  const card = waiting.entries.find((e) => e.kind === 'tool' && e.status === 'waiting');
+  assert.ok(card && card.kind === 'tool' && card.approval);
+  assert.equal((await projects.get(board.id))!.items.length, 0);
+  await hub.approve(board.id, card.id, true);
+  assert.equal((await projects.get(board.id))!.items[0]?.name, '待确认');
+});
+
 test('approved videos are queued, and after a restart the agent still carries on when they finish', async () => {
   const board = await projects.create('videos');
   const frame = { id: 'frame00001', kind: 'image' as const, x: 0, y: 0, w: 512, h: 288, createdAt: 1, asset: { id: 'af', url: '/files/af.png', kind: 'image' as const, mime: 'image/png', width: 1376, height: 768 } };

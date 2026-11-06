@@ -23,6 +23,7 @@ export type AgentSettingsPatch = {
   clearAgentApiKey?: boolean;
   agentVision?: boolean;
   agentThinking?: string;
+  agentApprovalMode?: 'risky' | 'always';
 };
 
 /** Identifies this tab's own board saves, so their change events are not merged back in. */

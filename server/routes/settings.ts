@@ -38,6 +38,7 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
       clearAgentApiKey?: boolean;
       agentVision?: boolean;
       agentThinking?: string;
+      agentApprovalMode?: 'risky' | 'always';
     }>();
     if (isLang(body.language) && body.language !== settings.value.language) {
       await settings.save({ language: body.language });
@@ -61,7 +62,7 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         capabilities.invalidate();
       }
     }
-    const agentChanged = body.agentModel !== undefined || body.agentBaseUrl !== undefined || body.agentApiKey !== undefined || body.clearAgentApiKey === true || body.agentVision !== undefined || body.agentThinking !== undefined;
+    const agentChanged = body.agentModel !== undefined || body.agentBaseUrl !== undefined || body.agentApiKey !== undefined || body.clearAgentApiKey === true || body.agentVision !== undefined || body.agentThinking !== undefined || body.agentApprovalMode !== undefined;
     if (agentChanged) {
       let baseUrl: string | undefined;
       if (body.agentBaseUrl !== undefined) {
@@ -83,6 +84,7 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         clearApiKey: body.clearAgentApiKey,
         vision: typeof body.agentVision === 'boolean' ? body.agentVision : undefined,
         thinking: body.agentThinking,
+        approvalMode: body.agentApprovalMode === 'always' || body.agentApprovalMode === 'risky' ? body.agentApprovalMode : undefined,
       });
       await agent.reconfigure();
     }

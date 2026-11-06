@@ -238,6 +238,8 @@ export interface Settings {
   agentBaseUrl?: string;
   agentVision?: boolean;
   agentThinking?: string;
+  /** Whether the assistant asks before every write operation. */
+  agentApprovalMode?: 'risky' | 'always';
   agentApiKeyConfigured?: boolean;
 }
 

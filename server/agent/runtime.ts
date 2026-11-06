@@ -86,6 +86,8 @@ interface ToolDetails {
   approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected'; payload: Json };
 }
 
+const AGENT_APPROVAL = '__infinode_agent_approval';
+
 const ACTIVE = new Set(['queued', 'running']);
 
 /** AGENT_BASE_URL: any OpenAI-compatible endpoint (豆包、百炼、Ollama、vLLM…), with AGENT_MODEL naming the model there. */
@@ -210,6 +212,7 @@ export class AgentHub {
   private model?: Model<Api>;
   private thinking!: ThinkingLevel;
   private vision = false;
+  private approvalMode: 'risky' | 'always' = 'risky';
   private readonly tools: CanvasTool[];
   private readonly labels: Map<string, CanvasTool>;
   private readonly opts: { models?: Models; model?: string; compactAt?: number };
@@ -241,6 +244,7 @@ export class AgentHub {
       apiKey: process.env.AGENT_API_KEY?.trim() || undefined,
       vision: process.env.AGENT_VISION === '1',
       thinking: process.env.AGENT_THINKING?.trim() || 'low',
+      approvalMode: 'risky' as const,
     };
     const models = this.opts.models ?? builtinModels();
     let name = cfg.model;
@@ -252,6 +256,7 @@ export class AgentHub {
     const slash = name.indexOf('/');
     this.model = slash > 0 ? this.models.getModel(name.slice(0, slash), name.slice(slash + 1)) : undefined;
     this.vision = Boolean(this.model?.input.includes('image'));
+    this.approvalMode = cfg.approvalMode;
     const wanted = cfg.thinking as ThinkingLevel;
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
   }
@@ -378,12 +383,21 @@ export class AgentHub {
       this.wake(s, t('用户没有确认「{title}」，什么都没提交。\n先别生成，问问用户想怎么调整。', { title: approval.title }));
       return;
     }
-    if (!tool?.approve) throw new RequestError(t('这个请求已经不能执行了'));
+    const pendingPayload = approval?.payload;
+    const isGenericOperation = pendingPayload && typeof pendingPayload === 'object' && !Array.isArray(pendingPayload) && pendingPayload[AGENT_APPROVAL] === true;
+    if (!tool || (!tool.approve && !isGenericOperation)) throw new RequestError(t('这个请求已经不能执行了'));
     approval.state = 'approved';
     details.summary = t('已确认，正在提交…');
     show();
     try {
-      const out = await tool.approve(approval.payload, this.context(s));
+      const payload = approval.payload as Json;
+      const operation = payload && typeof payload === 'object' && !Array.isArray(payload) && payload[AGENT_APPROVAL] === true ? payload : undefined;
+      const out = tool.approve
+        ? await tool.approve(payload, this.context(s))
+        : operation
+          ? await tool.run(operation.args as Record<string, unknown>, this.context(s))
+          : undefined;
+      if (!out) throw new RequestError(t('这个请求已经不能执行了'));
       details.summary = out.summary;
       if (out.items?.length) details.items = out.items;
     } catch (err) {
@@ -583,14 +597,30 @@ export class AgentHub {
     this.emit({ projectId: s.projectId, entry: { kind: 'event', id: `n${Date.now()}`, text, at: Date.now() } });
   }
 
-  private agentTool(t: CanvasTool, s: Session): AgentTool<TSchema, ToolDetails> {
+  private agentTool(def: CanvasTool, s: Session): AgentTool<TSchema, ToolDetails> {
     return {
-      name: t.name,
-      label: t.label,
-      description: t.description,
-      parameters: Type.Unsafe(t.parameters as unknown as TSchema),
+      name: def.name,
+      label: def.label,
+      description: def.description,
+      parameters: Type.Unsafe(def.parameters as unknown as TSchema),
       execute: async (_id, args, signal, onUpdate) => {
-        const out = await t.run(
+        // Video batches already provide a cost estimate and their own approval card.
+        if (this.approvalMode === 'always' && !def.readOnly && def.name !== 'batch_generate_videos') {
+          const summary = def.describe(args as Record<string, unknown>);
+          return {
+            content: [{ type: 'text', text: t('等待用户确认后再执行。') }],
+            details: {
+              summary: t('等待确认'),
+              approval: {
+                title: t('确认助手操作「{label}」', { label: t(def.label) }),
+                detail: summary ? t('助手准备执行：{summary}。确认后才会修改画布或提交任务。', { summary }) : t('助手准备执行这项会修改画布或提交任务的操作。确认后才会执行。'),
+                state: 'pending' as const,
+                payload: { [AGENT_APPROVAL]: true, args: args as unknown as Json },
+              },
+            },
+          };
+        }
+        const out = await def.run(
           args as Record<string, unknown>,
           this.context(s, { signal, progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: { summary: text } }) }),
         );

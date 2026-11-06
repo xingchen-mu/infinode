@@ -34,6 +34,7 @@ export function SettingsModal() {
   const [agentKeyConfigured, setAgentKeyConfigured] = useState(false);
   const [agentVision, setAgentVision] = useState(false);
   const [agentThinking, setAgentThinking] = useState('low');
+  const [agentApprovalMode, setAgentApprovalMode] = useState<'risky' | 'always'>('risky');
   const [agentSaved, setAgentSaved] = useState('');
   const [busy, setBusy] = useState<'test' | 'save' | 'license' | 'agent' | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -48,7 +49,8 @@ export function SettingsModal() {
       setAgentKeyConfigured(Boolean(s.agentApiKeyConfigured));
       setAgentVision(Boolean(s.agentVision));
       setAgentThinking(s.agentThinking ?? 'low');
-      setAgentSaved(JSON.stringify([s.agentModel ?? '', s.agentBaseUrl ?? '', Boolean(s.agentVision), s.agentThinking ?? 'low', Boolean(s.agentApiKeyConfigured)]));
+      setAgentApprovalMode(s.agentApprovalMode ?? 'risky');
+      setAgentSaved(JSON.stringify([s.agentModel ?? '', s.agentBaseUrl ?? '', Boolean(s.agentVision), s.agentThinking ?? 'low', s.agentApprovalMode ?? 'risky', Boolean(s.agentApiKeyConfigured)]));
     });
   }, []);
 
@@ -109,6 +111,7 @@ export function SettingsModal() {
         agentBaseUrl,
         agentVision,
         agentThinking,
+        agentApprovalMode,
         ...(agentApiKey.trim() ? { agentApiKey: agentApiKey.trim() } : {}),
         ...(clearApiKey ? { clearAgentApiKey: true } : {}),
       });
@@ -116,9 +119,10 @@ export function SettingsModal() {
       setAgentBaseUrl(r.settings.agentBaseUrl ?? '');
       setAgentVision(Boolean(r.settings.agentVision));
       setAgentThinking(r.settings.agentThinking ?? 'low');
+      setAgentApprovalMode(r.settings.agentApprovalMode ?? 'risky');
       setAgentKeyConfigured(Boolean(r.settings.agentApiKeyConfigured));
       setAgentApiKey('');
-      setAgentSaved(JSON.stringify([r.settings.agentModel ?? '', r.settings.agentBaseUrl ?? '', Boolean(r.settings.agentVision), r.settings.agentThinking ?? 'low', Boolean(r.settings.agentApiKeyConfigured)]));
+      setAgentSaved(JSON.stringify([r.settings.agentModel ?? '', r.settings.agentBaseUrl ?? '', Boolean(r.settings.agentVision), r.settings.agentThinking ?? 'low', r.settings.agentApprovalMode ?? 'risky', Boolean(r.settings.agentApiKeyConfigured)]));
       toast(t('画布助手配置已保存'), 'success');
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -127,7 +131,7 @@ export function SettingsModal() {
     }
   };
 
-  const agentDirty = JSON.stringify([agentModel, agentBaseUrl, agentVision, agentThinking, agentKeyConfigured || Boolean(agentApiKey)]) !== agentSaved;
+  const agentDirty = JSON.stringify([agentModel, agentBaseUrl, agentVision, agentThinking, agentApprovalMode, agentKeyConfigured || Boolean(agentApiKey)]) !== agentSaved;
 
   const builtins = Object.keys(BUILTIN_NAMES);
   return (
@@ -186,6 +190,8 @@ export function SettingsModal() {
           <label className="m-check"><input type="checkbox" checked={agentVision} onChange={(e) => setAgentVision(e.target.checked)} /><span>{t('启用视觉输入')}</span></label>
           <label className="m-help">{t('思考')} <select value={agentThinking} onChange={(e) => setAgentThinking(e.target.value)}><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
         </div>
+        <label className="m-help">{t('操作确认')} <select value={agentApprovalMode} onChange={(e) => setAgentApprovalMode(e.target.value as 'risky' | 'always')}><option value="risky">{t('高风险操作确认')}</option><option value="always">{t('所有写入操作确认')}</option></select></label>
+        <div className="m-help">{agentApprovalMode === 'always' ? t('助手修改画布、提交生成或运行工作流前都会先等你确认。') : t('视频批量生成等高成本操作会确认，普通操作直接执行。')}</div>
         <div className="m-row">
           <button className="btn primary" onClick={() => void saveAgent()} disabled={!agentDirty || busy !== null}>{busy === 'agent' ? <Loader2 className="spin" /> : null}{t('保存助手配置')}</button>
           {agentKeyConfigured && <button className="btn ghost" onClick={() => void saveAgent(true)} disabled={busy !== null}>{t('清除 API key')}</button>}

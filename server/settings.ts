@@ -11,6 +11,7 @@ export interface AgentConfig {
   apiKey?: string;
   vision: boolean;
   thinking: string;
+  approvalMode: 'risky' | 'always';
 }
 
 /** Settings changed in the app (data/settings.json); .env only supplies the defaults. */
@@ -29,6 +30,7 @@ export class SettingsStore {
       if (typeof saved.agentBaseUrl === 'string' && saved.agentBaseUrl.trim()) this.value.agentBaseUrl = saved.agentBaseUrl.trim();
       if (typeof saved.agentVision === 'boolean') this.value.agentVision = saved.agentVision;
       if (typeof saved.agentThinking === 'string' && saved.agentThinking.trim()) this.value.agentThinking = saved.agentThinking.trim();
+      if (saved.agentApprovalMode === 'risky' || saved.agentApprovalMode === 'always') this.value.agentApprovalMode = saved.agentApprovalMode;
       const raw = saved as Partial<Settings> & { agentApiKey?: unknown };
       if (typeof raw.agentApiKey === 'string' && raw.agentApiKey.trim()) this.agentApiKey = raw.agentApiKey.trim();
     } catch {
@@ -57,7 +59,8 @@ export class SettingsStore {
     const apiKey = this.agentApiKey || process.env.AGENT_API_KEY?.trim() || undefined;
     const vision = this.value.agentVision ?? process.env.AGENT_VISION === '1';
     const thinking = this.value.agentThinking?.trim() || process.env.AGENT_THINKING?.trim() || 'low';
-    return { model, baseUrl, apiKey, vision, thinking };
+    const approvalMode = this.value.agentApprovalMode === 'always' ? 'always' : 'risky';
+    return { model, baseUrl, apiKey, vision, thinking, approvalMode };
   }
 
   async saveAgentConfig(patch: {
@@ -65,6 +68,7 @@ export class SettingsStore {
     baseUrl?: string;
     vision?: boolean;
     thinking?: string;
+    approvalMode?: 'risky' | 'always';
     apiKey?: string;
     clearApiKey?: boolean;
   }) {
@@ -84,6 +88,7 @@ export class SettingsStore {
       if (thinking) this.value.agentThinking = thinking;
       else delete this.value.agentThinking;
     }
+    if (patch.approvalMode !== undefined) this.value.agentApprovalMode = patch.approvalMode;
     if (patch.clearApiKey) this.agentApiKey = undefined;
     if (patch.apiKey?.trim()) this.agentApiKey = patch.apiKey.trim();
     this.updateAgentKeyStatus();
