@@ -3,7 +3,12 @@
   "private": true,
   "version": "0.2.0",
   "main": "desktop/main.mjs",
+  "desktopName": "Infinode",
   "description": "Infinite canvas for ComfyUI: generate, edit and animate images on a board, with every result linked to its inputs.",
+  "author": {
+    "name": "Infinode contributors",
+    "email": "xingchen-mu@users.noreply.github.com"
+  },
   "license": "MIT",
   "keywords": [
     "comfyui",
@@ -94,6 +99,7 @@
     },
     "linux": {
       "category": "Graphics",
+      "syncDesktopName": true,
       "target": [
         "AppImage",
         "deb"
