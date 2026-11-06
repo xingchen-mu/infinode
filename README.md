@@ -96,6 +96,15 @@ npm run desktop:dist
 
 `desktop:dist` 会按当前系统生成安装包；在 macOS、Windows 或 Linux 上分别运行即可生成对应平台的包。桌面端仍然连接你配置的本机、局域网或远程 ComfyUI。画布助手使用的 API 配置可放在应用数据目录的 `.env` 文件中；命令行启动方式仍使用项目根目录的 `.env`。
 
+### 产品网站
+
+仓库中的 `site/` 是产品官网和交互演示，推送到 `main` 后会由 GitHub Actions 部署到 GitHub Pages。首次使用时，在仓库的 **Settings → Pages** 中将发布来源设为 **GitHub Actions**；本地预览可运行：
+
+```bash
+npm run site:build
+python3 -m http.server 4173 --directory site
+```
+
 ### 连接不同位置的 ComfyUI
 
 | ComfyUI 在哪 | 怎么连 |
@@ -302,7 +311,9 @@ npm run desktop:dev   # run the app in a desktop window
 npm run desktop:dist  # build an installer for the current platform
 ```
 
-The desktop app starts the local Infinode server itself and keeps its data in the system application-data directory.
+The desktop app starts the local Infinode server itself and keeps its data in the system application-data directory. The `site/` directory contains the product page and interactive walkthrough; GitHub Actions publishes it to GitHub Pages on every push to `main`.
+
+**Website:** [infinode online demo](https://xingchen-mu.github.io/infinode/) is a static product page with an interactive canvas walkthrough. It does not use a GPU; real generation still runs through your own ComfyUI in the desktop or self-hosted app.
 
 **License:** [MIT](LICENSE), free for personal and commercial use.
 

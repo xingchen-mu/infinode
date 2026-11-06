@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Infinode：为 ComfyUI 打造的无限画布，把提示词、参考图、工作流和生成结果放在同一条创作链上。" />
+    <meta name="theme-color" content="#0b0f0d" />
+    <title>Infinode · 把 AI 创作变成一张无限画布</title>
+    <link rel="icon" href="assets/logo.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Infinode 首页">
+        <img src="assets/logo.svg" alt="" />
+        <span>Infinode</span>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#features">功能</a>
+        <a href="#demo">交互演示</a>
+        <a href="#workflow">怎么工作</a>
+        <a href="https://github.com/xingchen-mu/infinode" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </nav>
+      <a class="nav-button" href="#demo">开始体验 <span>↗</span></a>
+    </header>
+
+    <main id="top">
+      <section class="hero section-shell">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot"></span> OPEN SOURCE · COMFYUI NATIVE</p>
+          <h1>把 AI 创作<br /><em>变成一张无限画布。</em></h1>
+          <p class="hero-lede">提示词、参考图、工作流和每一次生成，都留在同一条看得懂、改得动的创作链上。</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#demo">拖动节点试试 <span>↓</span></a>
+            <a class="button button-quiet" href="https://github.com/xingchen-mu/infinode" target="_blank" rel="noreferrer">查看源码 <span>↗</span></a>
+          </div>
+          <p class="hero-note">免费、开源，生成始终使用你自己的 ComfyUI。</p>
+        </div>
+        <div class="hero-art" aria-label="Infinode 无限画布预览">
+          <div class="hero-glow"></div>
+          <div class="hero-window">
+            <div class="window-bar"><span></span><span></span><span></span><b>infinode / summer-story</b><i>⌘ K</i></div>
+            <div class="hero-board">
+              <svg class="hero-lines" viewBox="0 0 630 340" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M150 111 C222 111 213 164 283 164" />
+                <path d="M150 263 C215 263 216 200 283 200" />
+                <path d="M420 182 C478 182 480 110 530 110" />
+                <path d="M420 206 C480 206 482 267 530 267" />
+              </svg>
+              <div class="board-label">SUMMER STORY / 04 NODES</div>
+              <div class="art-node node-prompt"><span class="node-type">PROMPT</span><strong>雨后的东京街头</strong><small>cinematic · 35mm · dusk</small></div>
+              <div class="art-node node-ref"><img src="assets/hero.png" alt="城市参考图" /><span class="node-type">REFERENCE</span></div>
+              <div class="art-node node-result result-one"><div class="result-image"></div><span class="node-type">IMAGE / 01</span></div>
+              <div class="art-node node-result result-two"><div class="result-image result-image-two"></div><span class="node-type">IMAGE / 02</span></div>
+              <div class="cursor cursor-a">✦<label>你</label></div>
+            </div>
+            <div class="hero-toolbar"><span>＋ 添加节点</span><span>⌘ Z　⌘ D</span><b>● ComfyUI 已连接</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof section-shell">
+        <p>为熟悉 ComfyUI 的创作者准备</p>
+        <div class="proof-items"><span>无限画布</span><i></i><span>工作流原生</span><i></i><span>本地优先</span><i></i><span>MIT 开源</span></div>
+      </section>
+
+      <section id="features" class="features section-shell">
+        <div class="section-intro"><p class="eyebrow">WHY INFINODE</p><h2>把“试试看”<br />变成一条可回溯的路。</h2><p>画布记录的不只是结果，还有它从哪里来、用过什么、下一步能怎么走。</p></div>
+        <div class="feature-grid">
+          <article class="feature-card feature-large"><span class="feature-number">01</span><div class="feature-icon icon-canvas">⌘</div><h3>无限画布</h3><p>像整理灵感一样整理生成结果。平移、缩放、框选、连线，所有分支一眼看清。</p><div class="mini-canvas"><span class="mini-line"></span><i class="mini-box one"></i><i class="mini-box two"></i><i class="mini-box three"></i></div></article>
+          <article class="feature-card"><span class="feature-number">02</span><div class="feature-icon">↗</div><h3>连线即工作流</h3><p>从一张图拉出下一步，参考图、首帧和输入关系自动保留下来。</p><div class="feature-pills"><span>参考图</span><span>扩图</span><span>生视频</span></div></article>
+          <article class="feature-card"><span class="feature-number">03</span><div class="feature-icon">◌</div><h3>你的模型，你做主</h3><p>直接连接本机、局域网或远程 ComfyUI。模型和工作流都在自己的机器上。</p><div class="status-line"><b></b> ComfyUI connected <span>8188</span></div></article>
+          <article class="feature-card feature-wide"><span class="feature-number">04</span><div><div class="feature-icon">✦</div><h3>让助手替你跑一遍</h3><p>告诉画布助手“把这三张图各做一段视频”，它会读取上下文、调用工具，并把结果放回原来的创作链。</p></div><div class="assistant-bubble"><span>助手</span><strong>我找到 3 张选中的图了。<br />要分别生成 5 秒视频吗？</strong><small>预计占用 GPU 约 2 分钟　<span>开始</span></small></div></article>
+        </div>
+      </section>
+
+      <section id="demo" class="demo section-shell">
+        <div class="section-intro"><p class="eyebrow">TRY THE IDEA</p><h2>拖动它们，<br /><em>看创作链怎么展开。</em></h2><p>这是一个无需安装的前端演示。拖动节点、编辑提示词，然后运行一次模拟生成。</p></div>
+        <div class="demo-stage">
+          <div class="demo-stage-top"><span><b></b><b></b><b></b></span><label>infinode / interactive-demo</label><span class="demo-zoom">−　100%　＋</span></div>
+          <div id="demo-board" class="demo-board">
+            <svg class="demo-lines" aria-hidden="true"><path id="line-prompt" /><path id="line-ref" /><path id="line-out" /></svg>
+            <div class="demo-hint">拖动节点　·　双击提示词可编辑</div>
+            <article class="demo-node demo-prompt" data-node="prompt" style="left: 7%; top: 35%"><span class="node-type">PROMPT</span><h4 contenteditable="true" spellcheck="false">海边的风吹过白色窗帘</h4><p>cinematic still · soft light</p><span class="drag-handle">✦</span></article>
+            <article class="demo-node demo-ref" data-node="ref" style="left: 35%; top: 12%"><div class="demo-ref-image"></div><span class="node-type">REFERENCE / 01</span><span class="drag-handle">✦</span></article>
+            <article class="demo-node demo-output" data-node="out" style="left: 66%; top: 30%"><div class="demo-output-image"><span class="output-shine"></span></div><span class="node-type">GENERATED IMAGE</span><strong>01 / 03</strong><span class="drag-handle">✦</span></article>
+            <div id="demo-cursor" class="demo-cursor">✦<span>try me</span></div>
+          </div>
+          <div class="demo-stage-bottom"><button id="run-demo" class="demo-run">▶ 运行一次演示</button><span id="demo-status">拖动节点或编辑文字开始</span><span>模拟模式 · 不会调用 GPU</span></div>
+        </div>
+      </section>
+
+      <section id="workflow" class="workflow section-shell">
+        <div class="workflow-copy"><p class="eyebrow">FROM IDEA TO RESULT</p><h2>从一句话，到<br /><em>看得见的创作过程。</em></h2><a class="text-link" href="https://github.com/xingchen-mu/infinode#快速开始" target="_blank" rel="noreferrer">了解真实部署方式 <span>↗</span></a></div>
+        <ol class="steps"><li><b>01</b><div><h3>连接 ComfyUI</h3><p>本机、局域网或远程服务器都可以。</p></div></li><li><b>02</b><div><h3>放入灵感和提示词</h3><p>拖入图片，或者从画布底部开始输入。</p></div></li><li><b>03</b><div><h3>沿着连线继续创作</h3><p>每个结果都能成为下一次生成的起点。</p></div></li></ol>
+      </section>
+
+      <section class="closing section-shell"><div><p class="eyebrow">YOUR CANVAS IS WAITING</p><h2>下一张图，<br /><em>从一条线开始。</em></h2></div><div class="closing-actions"><a class="button button-primary" href="https://github.com/xingchen-mu/infinode" target="_blank" rel="noreferrer">在 GitHub 获取 <span>↗</span></a><p>桌面端 · 自托管 · MIT License</p></div></section>
+    </main>
+
+    <footer class="site-footer section-shell"><a class="brand" href="#top"><img src="assets/logo.svg" alt="" /><span>Infinode</span></a><p>Infinite canvas for ComfyUI.</p><div><a href="https://github.com/xingchen-mu/infinode" target="_blank" rel="noreferrer">GitHub ↗</a><a href="#top">回到顶部 ↑</a></div></footer>
+    <script src="app.js" defer></script>
+  </body>
+</html>
