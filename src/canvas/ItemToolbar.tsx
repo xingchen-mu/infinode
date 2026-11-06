@@ -1,4 +1,4 @@
-import { Brush, Camera, Clapperboard, Download, Eraser, Expand, Maximize2, Pencil, Puzzle, RefreshCw, Scissors, Sparkles, Trash2 } from 'lucide-react';
+import { Brush, Camera, Clapperboard, Download, Eraser, Expand, Info, Maximize2, Pencil, Puzzle, RefreshCw, Scissors, Sparkles, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { isBlock } from '../../shared/licenses';
 import type { CanvasItem, WorkflowLike } from '../../shared/types';
@@ -75,6 +75,7 @@ export function ItemToolbar() {
     return (
       <div className="item-toolbar" data-ui style={{ left: Math.min(Math.max(s.x + s.w / 2, 90), screen.w - 90), top }} onPointerDown={(e) => e.stopPropagation()}>
         <Btn icon={<Pencil />} label={t('编辑')} title={t('编辑文本（双击也可以）')} onClick={() => useStore.setState({ noteEditing: item.id })} />
+        <Btn icon={<Info />} title={t('查看节点信息')} onClick={() => useStore.setState({ modal: { type: 'details', itemId: item.id } })} />
         <Btn icon={<Trash2 />} title={t('删除')} danger onClick={() => removeItems([item.id])} />
       </div>
     );
@@ -163,6 +164,7 @@ export function ItemToolbar() {
         </div>
       )}
       {item.request && <Btn icon={<RefreshCw />} title={t('用同样的设置再生成一个')} onClick={() => void regenerate(item)} />}
+      <Btn icon={<Info />} title={t('查看节点信息')} onClick={() => useStore.setState({ modal: { type: 'details', itemId: item.id } })} />
       <Btn icon={<Download />} title={t('下载')} onClick={() => download(item)} />
       <Btn icon={<Trash2 />} title={t('删除')} danger onClick={() => removeItems([item.id])} />
     </div>

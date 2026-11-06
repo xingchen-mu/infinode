@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, Copy, Download, Eye, ImagePlus, Scan, Trash2 } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, ClipboardPaste, Copy, Download, Eye, ImagePlus, Info, Scan, Trash2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { addFiles, download } from '../assets/actions';
 import { duplicate, reorder } from './items';
@@ -45,6 +45,9 @@ export function ContextMenu({ menu, onClose }: { menu: MenuState; onClose: () =>
               <Eye /> {t('预览')}
             </button>
           )}
+          <button className="menu-item" onClick={run(() => useStore.setState({ modal: { type: 'details', itemId: item.id } }))}>
+            <Info /> {t('节点信息')}
+          </button>
           {item.asset && (
             <button className="menu-item" onClick={run(() => download(item))}>
               <Download /> {t('下载')}

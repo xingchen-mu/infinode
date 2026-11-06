@@ -11,7 +11,7 @@ export interface EditMode {
   workflowId?: string;
 }
 
-export type Modal = null | { type: 'settings' } | { type: 'workflows' } | { type: 'presets' } | { type: 'assets' } | { type: 'editor'; draft: WorkflowDraft; id?: string };
+export type Modal = null | { type: 'settings' } | { type: 'workflows' } | { type: 'presets' } | { type: 'assets' } | { type: 'details'; itemId: string } | { type: 'editor'; draft: WorkflowDraft; id?: string };
 export interface Toast {
   id: number;
   text: string;
