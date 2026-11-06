@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0e0f11;
   --grid: #26282d;
   --panel: #17181c;
@@ -53,6 +54,38 @@ button:disabled {
 input,
 textarea {
   font: inherit;
+  color-scheme: dark;
+}
+
+select,
+option,
+optgroup {
+  color-scheme: dark;
+}
+
+select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+select option,
+select optgroup {
+  background: var(--panel);
+  color: var(--text);
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--text);
+  -webkit-box-shadow: 0 0 0 1000px var(--panel-2) inset;
+  transition: background-color 9999s ease-out 0s;
 }
 
 svg {
@@ -1017,7 +1050,7 @@ button.pill:hover {
   padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--panel-2);
   color: var(--text-3);
 }
 
@@ -1033,6 +1066,7 @@ button.pill:hover {
   background: transparent;
   color: var(--text);
   font-size: 12px;
+  color-scheme: dark;
 }
 
 .canvas-search-result {
@@ -2013,7 +2047,7 @@ textarea::placeholder {
   padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--panel-2);
   color: var(--text-3);
 }
 
@@ -2029,6 +2063,7 @@ textarea::placeholder {
   background: transparent;
   color: var(--text);
   font-size: 12px;
+  color-scheme: dark;
 }
 
 .asset-search input::placeholder {
@@ -2040,7 +2075,7 @@ textarea::placeholder {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--panel-2);
   color: var(--text-2);
   font-size: 12px;
 }
@@ -2280,7 +2315,7 @@ textarea::placeholder {
   flex: 1;
   min-width: 0;
   height: 36px;
-  background: var(--bg);
+  background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 9px;
   color: var(--text);
