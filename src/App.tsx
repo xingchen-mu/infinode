@@ -154,6 +154,11 @@ export function App() {
       .catch(() => {});
     void loadWorkflows();
     void refreshCaps();
+    if (localStorage.getItem('infinode:onboarding') !== 'done') {
+      window.setTimeout(() => {
+        if (!useStore.getState().modal) useStore.setState({ modal: { type: 'onboarding' } });
+      }, 450);
+    }
     const capsTimer = setInterval(() => void refreshCaps(), 60_000);
     let wasConnected = true;
     const stopEvents = subscribeEvents({
