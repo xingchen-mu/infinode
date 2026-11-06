@@ -13,6 +13,13 @@ export interface AssetInfo {
   name?: string;
   /** Videos: seconds, once the page has read it. */
   duration?: number;
+  createdAt?: number;
+  usage?: AssetUsage;
+}
+
+export interface AssetUsage {
+  references: number;
+  projects: { id: string; name: string }[];
 }
 
 export type ImageModel = 'zimage' | 'qwen';

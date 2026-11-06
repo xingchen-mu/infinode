@@ -151,6 +151,6 @@ export class AssetStore {
 }
 
 export function publicAsset(a: StoredAsset): AssetInfo {
-  const { id, url, kind, mime, width, height, name } = a;
-  return { id, url, kind, mime, width, height, ...(name ? { name } : {}) };
+  const { id, url, kind, mime, width, height, name, createdAt } = a;
+  return { id, url, kind, mime, width, height, ...(name ? { name } : {}), createdAt };
 }

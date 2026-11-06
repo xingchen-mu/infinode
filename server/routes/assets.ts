@@ -6,8 +6,12 @@ import { mimeFor, publicAsset } from '../assets/store.ts';
 import { t } from '../i18n.ts';
 import type { Services } from '../services.ts';
 
-export function registerAssetsRoutes(app: Hono, { assets, thumbs }: Pick<Services, 'assets' | 'thumbs'>) {
-  app.get('/api/assets', (c) => c.json(assets.list().map(publicAsset)));
+export function registerAssetsRoutes(app: Hono, { assets, thumbs, projects }: Pick<Services, 'assets' | 'thumbs' | 'projects'>) {
+  app.get('/api/assets', async (c) => {
+    const stored = assets.list();
+    const usage = await projects.assetUsage(stored.map((a) => a.id));
+    return c.json(stored.map((asset) => ({ ...publicAsset(asset), usage: usage[asset.id] })));
+  });
 
   app.post('/api/assets', async (c) => {
     const body = await c.req.parseBody();

@@ -5,6 +5,7 @@ import { thumbUrl } from '../../shared/media';
 import { addAssets, addFiles } from './actions';
 import { api } from '../lib/api';
 import { Modal } from '../components/Modal';
+import { openProject } from '../projects/sync';
 import { t } from '../i18n';
 import { toast, useStore } from '../store';
 
@@ -25,6 +26,7 @@ export function AssetsModal() {
   const [assets, setAssets] = useState<AssetInfo[]>([]);
   const [kind, setKind] = useState<'all' | MediaKind>('all');
   const [query, setQuery] = useState('');
+  const [usage, setUsage] = useState<'all' | 'used' | 'unused'>('all');
   const [loading, setLoading] = useState(true);
   const input = useRef<HTMLInputElement>(null);
 
@@ -45,8 +47,11 @@ export function AssetsModal() {
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return assets.filter((asset) => (kind === 'all' || asset.kind === kind) && (!q || (asset.name ?? '').toLowerCase().includes(q)));
-  }, [assets, kind, query]);
+    return assets.filter((asset) => {
+      const used = Boolean(asset.usage?.references);
+      return (kind === 'all' || asset.kind === kind) && (usage === 'all' || (usage === 'used' ? used : !used)) && (!q || (asset.name ?? '').toLowerCase().includes(q));
+    });
+  }, [assets, kind, query, usage]);
 
   const upload = async (files: File[]) => {
     await addFiles(files);
@@ -64,6 +69,11 @@ export function AssetsModal() {
               </button>
             ))}
           </div>
+          <select className="asset-select" value={usage} onChange={(e) => setUsage(e.target.value as 'all' | 'used' | 'unused')}>
+            <option value="all">{t('全部资产')}</option>
+            <option value="used">{t('已用于项目')}</option>
+            <option value="unused">{t('未使用')}</option>
+          </select>
           <label className="asset-search"><Search /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('搜索资产名称')} /></label>
           <button className="icon-btn small" title={t('刷新')} onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'spin' : ''} /></button>
           <button className="btn primary asset-upload" onClick={() => input.current?.click()}><ImagePlus /> {t('上传资产')}</button>
@@ -74,10 +84,12 @@ export function AssetsModal() {
         ) : visible.length ? (
           <div className="asset-grid">
             {visible.map((asset) => (
-              <button key={asset.id} className="asset-card" onClick={() => { addAssets([asset]); toast(t('已添加到画布'), 'success'); }} title={t('点击添加到画布')}>
+              <div key={asset.id} className="asset-card" role="button" tabIndex={0} onClick={() => { addAssets([asset]); toast(t('已添加到画布'), 'success'); }} onKeyDown={(e) => e.key === 'Enter' && (addAssets([asset]), toast(t('已添加到画布'), 'success'))} title={t('点击添加到画布')}>
                 <div className="asset-preview"><Preview asset={asset} /><span className="asset-kind">{kindLabel(asset.kind)}</span><span className="asset-add"><Plus /></span></div>
-                <div className="asset-meta"><strong>{asset.name || t('未命名资产')}</strong><small>{asset.width} × {asset.height}</small></div>
-              </button>
+                <div className="asset-meta"><strong>{asset.name || t('未命名资产')}</strong><small>{asset.width} × {asset.height}{asset.usage?.references ? ` · ${t('{n} 次引用', { n: asset.usage.references })}` : ''}</small>
+                  {asset.usage?.projects.length ? <div className="asset-source">{asset.usage.projects.slice(0, 2).map((project) => <button key={project.id} onClick={(e) => { e.stopPropagation(); void openProject(project.id); }}>{project.name}</button>)}{asset.usage.projects.length > 2 ? ` +${asset.usage.projects.length - 2}` : ''}</div> : <div className="asset-source muted">{t('尚未放入项目')}</div>}
+                </div>
+              </div>
             ))}
           </div>
         ) : (

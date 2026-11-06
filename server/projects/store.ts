@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { nanoid } from 'nanoid';
-import type { CanvasItem, Project, ProjectSnapshotSummary, ProjectSummary } from '../../shared/types.ts';
+import type { AssetUsage, CanvasItem, Project, ProjectSnapshotSummary, ProjectSummary } from '../../shared/types.ts';
 import { config } from '../config.ts';
 import { t } from '../i18n.ts';
 
@@ -72,6 +72,27 @@ export class ProjectStore {
     } catch {
       return undefined;
     }
+  }
+
+  /** Finds where stored assets are currently used, for the asset library's reverse links. */
+  async assetUsage(ids: string[]): Promise<Record<string, AssetUsage>> {
+    const wanted = new Set(ids);
+    const out: Record<string, AssetUsage> = {};
+    for (const id of wanted) out[id] = { references: 0, projects: [] };
+    for (const summary of await this.list()) {
+      const project = await this.get(summary.id);
+      if (!project) continue;
+      const counts = new Map<string, number>();
+      for (const item of project.items) {
+        const assetId = item.asset?.id;
+        if (assetId && wanted.has(assetId)) counts.set(assetId, (counts.get(assetId) ?? 0) + 1);
+      }
+      for (const [id, count] of counts) {
+        out[id].references += count;
+        out[id].projects.push({ id: project.id, name: project.name });
+      }
+    }
+    return out;
   }
 
   async create(name = t('未命名画布')): Promise<Project> {

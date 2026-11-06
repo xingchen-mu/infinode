@@ -1874,6 +1874,16 @@ textarea::placeholder {
   color: var(--text-3);
 }
 
+.asset-select {
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
 .asset-upload {
   white-space: nowrap;
 }
@@ -1993,6 +2003,31 @@ textarea::placeholder {
 .asset-meta small {
   color: var(--text-3);
   font-size: 10px;
+}
+
+.asset-source {
+  display: flex;
+  gap: 4px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.asset-source button {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-source button:hover {
+  text-decoration: underline;
+}
+
+.asset-source.muted {
+  display: block;
 }
 
 .asset-empty {

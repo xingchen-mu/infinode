@@ -140,6 +140,13 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     assert.equal(asset.width, 2);
     const listed: AssetInfo[] = await (await request('/api/assets')).json();
     assert.deepEqual(listed.map((a) => a.id), [asset.id]);
+    assert.equal(listed[0].usage?.references, 0);
+    const usageProject: Project = await (await request('/api/projects', 'POST', { name: 'Asset usage' })).json();
+    await request(`/api/projects/${usageProject.id}/items`, 'PATCH', { upsert: [{ id: 'asset-ref', kind: 'image', x: 0, y: 0, w: 100, h: 100, asset, createdAt: Date.now() }] });
+    const used = (await (await request('/api/assets')).json())[0] as AssetInfo;
+    assert.equal(used.usage?.references, 1);
+    assert.equal(used.usage?.projects[0]?.name, 'Asset usage');
+    await request(`/api/projects/${usageProject.id}`, 'DELETE');
     assert.deepEqual(Buffer.from(await (await request(asset.url)).arrayBuffer()), png);
     assert.deepEqual(await readFile(join(dataDir, 'assets', asset.url.split('/').pop()!)), png);
     const range = await request(asset.url, 'GET', undefined, { range: 'bytes=0-7' });
