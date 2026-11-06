@@ -7,6 +7,8 @@ import { t } from '../i18n.ts';
 import type { Services } from '../services.ts';
 
 export function registerAssetsRoutes(app: Hono, { assets, thumbs }: Pick<Services, 'assets' | 'thumbs'>) {
+  app.get('/api/assets', (c) => c.json(assets.list().map(publicAsset)));
+
   app.post('/api/assets', async (c) => {
     const body = await c.req.parseBody();
     const file = body.file;

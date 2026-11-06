@@ -73,6 +73,7 @@ export const api = {
     }
     return request<AssetInfo>('/api/assets', { method: 'POST', body: form });
   },
+  assets: () => request<AssetInfo[]>('/api/assets'),
 
   setAssetSize: (id: string, width: number, height: number) =>
     request<{ ok: true }>(`/api/assets/${id}/size`, json('POST', { width, height })),

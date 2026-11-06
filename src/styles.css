@@ -1741,6 +1741,251 @@ textarea::placeholder {
   margin-right: auto;
 }
 
+/* ---------------------------------------------------------------- asset library */
+
+.asset-library {
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
+}
+
+.asset-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.asset-tabs {
+  display: flex;
+  gap: 3px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.asset-tabs button {
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.asset-tabs button.on {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.asset-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 120px;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-3);
+}
+
+.asset-search svg {
+  width: 15px;
+  height: 15px;
+}
+
+.asset-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.asset-search input::placeholder {
+  color: var(--text-3);
+}
+
+.asset-upload {
+  white-space: nowrap;
+}
+
+.asset-upload svg {
+  width: 15px;
+  height: 15px;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding: 16px 2px 10px;
+}
+
+.asset-card {
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+  text-align: left;
+  transition: border-color 0.18s, transform 0.18s;
+}
+
+.asset-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.asset-preview {
+  position: relative;
+  height: 128px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--checker) 0 0 / 16px 16px;
+}
+
+.asset-preview img,
+.asset-preview video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.asset-fallback {
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+.asset-fallback svg {
+  width: 32px;
+  height: 32px;
+}
+
+.asset-kind {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 10px;
+}
+
+.asset-add {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+
+.asset-card:hover .asset-add {
+  opacity: 1;
+}
+
+.asset-add svg {
+  width: 16px;
+  height: 16px;
+}
+
+.asset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 10px 10px;
+}
+
+.asset-meta strong,
+.asset-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-meta strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.asset-meta small {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.asset-empty {
+  flex: 1;
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.asset-empty svg {
+  width: 30px;
+  height: 30px;
+  margin-bottom: 4px;
+  color: var(--accent);
+}
+
+.asset-empty strong {
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.asset-empty span {
+  font-size: 12px;
+}
+
+.asset-foot {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+@media (max-width: 620px) {
+  .asset-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .asset-tabs {
+    order: 1;
+  }
+
+  .asset-search {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .asset-upload {
+    margin-left: auto;
+  }
+}
+
 .m-section {
   display: flex;
   flex-direction: column;

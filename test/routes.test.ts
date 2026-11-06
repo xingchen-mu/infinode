@@ -124,6 +124,8 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     assert.equal(uploaded.status, 200);
     const asset: AssetInfo = await uploaded.json();
     assert.equal(asset.width, 2);
+    const listed: AssetInfo[] = await (await request('/api/assets')).json();
+    assert.deepEqual(listed.map((a) => a.id), [asset.id]);
     assert.deepEqual(Buffer.from(await (await request(asset.url)).arrayBuffer()), png);
     assert.deepEqual(await readFile(join(dataDir, 'assets', asset.url.split('/').pop()!)), png);
     const range = await request(asset.url, 'GET', undefined, { range: 'bytes=0-7' });

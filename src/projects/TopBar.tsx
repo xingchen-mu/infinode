@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Cloud, CloudOff, Loader2, Minus, Plus, Puzzle, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Cloud, CloudOff, Images, Loader2, Minus, Plus, Puzzle, Settings as SettingsIcon, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { thumbUrl } from '../../shared/media';
 import type { ProjectSummary, Task } from '../../shared/types';
@@ -223,6 +223,9 @@ export function TopBar() {
         <TaskMenu />
         <button className="pill" onClick={() => useStore.setState({ modal: { type: 'workflows' } })} title={t('导入和管理自己的 ComfyUI 工作流')}>
           <Puzzle /> {t('我的工作流')}
+        </button>
+        <button className="pill" onClick={() => useStore.setState({ modal: { type: 'assets' } })} title={t('浏览和管理已上传或生成的图片、视频')}>
+          <Images /> {t('资产库')}
         </button>
         <button
           className={`pill status ${serverOnline && comfyOnline ? 'ok' : 'bad'}`}

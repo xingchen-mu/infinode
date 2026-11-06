@@ -61,6 +61,10 @@ export class AssetStore {
     return this.assets.get(id);
   }
 
+  list(): StoredAsset[] {
+    return [...this.assets.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
   path(asset: StoredAsset) {
     return join(this.dir, asset.file);
   }
