@@ -112,7 +112,7 @@ export const EN: Record<string, Translation> = {
 
   // ---------------------------------------------------------------- models
   '高质量 · 擅长中文文字 · 选中图片即可参考编辑': 'High quality · great at Chinese text · select images to edit with references',
-  '极速出图 · 约 8 秒 · 不支持参考图': 'Very fast · about 8 s · no reference images',
+  '8 步生成 · 首次加载较慢 · 不支持参考图': '8 sampling steps · slower first load · no reference images',
   '带原生音频 · 首帧/尾帧可选 · 模型较大，生成需要几分钟': 'Native audio · optional first/last frame · large model, takes a few minutes',
   'MiniMax H3 多图参考': 'MiniMax H3 multi-reference',
   '最多 9 张参考图，提示词里用 @图1 引用': 'Up to 9 reference images; refer to them as @image1… in the prompt',
@@ -376,6 +376,7 @@ export const EN: Record<string, Translation> = {
   '放大 (⌘=)': 'Zoom in (⌘=)',
   '保存中…': 'Saving…',
   保存失败: 'Save failed',
+  '画布尚未保存，请等待保存成功后再继续': 'The board has not been saved yet. Please wait until saving succeeds before continuing.',
   '导入和管理自己的 ComfyUI 工作流': 'Import and manage your own ComfyUI workflows',
   本地服务未连接: 'Local server not connected',
   'ComfyUI 未连接：检查 SSH 隧道和服务器上的 ComfyUI': 'ComfyUI not connected: check the SSH tunnel and ComfyUI on the server',

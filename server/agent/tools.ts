@@ -6,8 +6,8 @@ import { msg } from '../../shared/i18n.ts';
 import { licenseLabel } from '../../shared/licenses.ts';
 import { list, t } from '../i18n.ts';
 import type { CanvasItem, ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
-import { GAP, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
-import { publicAsset } from '../assets.ts';
+import { GAP, boundsOf, displaySize, placeRow } from '../../shared/geometry.ts';
+import { publicAsset } from '../assets/store.ts';
 import {
   type BatchJob,
   type CanvasDeps,

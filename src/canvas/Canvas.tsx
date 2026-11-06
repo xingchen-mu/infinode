@@ -1,11 +1,12 @@
 import { Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { CanvasItem } from '../../shared/types';
-import { addFiles, ensureVisible } from '../lib/actions';
+import { addFiles } from '../assets/actions';
+import { ensureVisible } from './view';
 import { THUMB_PX } from '../../shared/media';
-import { GAP, type Rect, boundsOf, intersects, placeRow, toScreen, toWorld, visibleRect } from '../lib/geometry';
+import { GAP, type Rect, boundsOf, intersects, placeRow, toScreen, toWorld, visibleRect } from '../../shared/geometry';
 import { beginGesture, endGesture, select, setComposer, setViewport, updateItems, useStore, zoomAt } from '../store';
-import { ContextMenu, type MenuState } from '../ui/ContextMenu';
+import { ContextMenu, type MenuState } from './ContextMenu';
 import { MaskCanvas } from '../editors/MaskEditor';
 import { OutpaintFrame } from '../editors/OutpaintEditor';
 import { ItemToolbar } from './ItemToolbar';

@@ -79,6 +79,23 @@ npm run dev
 
 打开 <http://localhost:5173>。点右上角的 ComfyUI 状态按钮进入**设置**，填入 ComfyUI 地址（本机默认 `http://127.0.0.1:8188`），测试通过后保存。
 
+### 桌面端
+
+项目也提供 Electron 桌面端。它会在本机启动 Infinode 服务并打开独立窗口，作品数据保存在系统的应用数据目录中，不需要手动打开浏览器：
+
+```bash
+npm install
+npm run desktop:dev
+```
+
+生成可分发安装包：
+
+```bash
+npm run desktop:dist
+```
+
+`desktop:dist` 会按当前系统生成安装包；在 macOS、Windows 或 Linux 上分别运行即可生成对应平台的包。桌面端仍然连接你配置的本机、局域网或远程 ComfyUI。画布助手使用的 API 配置可放在应用数据目录的 `.env` 文件中；命令行启动方式仍使用项目根目录的 `.env`。
+
 ### 连接不同位置的 ComfyUI
 
 | ComfyUI 在哪 | 怎么连 |
@@ -277,6 +294,15 @@ git clone <this repository> infinode && cd infinode
 npm install
 npm run dev   # open http://localhost:5173, then set your ComfyUI address in Settings
 ```
+
+An Electron desktop build is also available:
+
+```bash
+npm run desktop:dev   # run the app in a desktop window
+npm run desktop:dist  # build an installer for the current platform
+```
+
+The desktop app starts the local Infinode server itself and keeps its data in the system application-data directory.
 
 **License:** [MIT](LICENSE), free for personal and commercial use.
 

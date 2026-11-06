@@ -2,6 +2,7 @@
   "name": "infinode",
   "private": true,
   "version": "0.2.0",
+  "main": "desktop/main.mjs",
   "description": "Infinite canvas for ComfyUI: generate, edit and animate images on a board, with every result linked to its inputs.",
   "license": "MIT",
   "keywords": [
@@ -25,6 +26,9 @@
     "tunnel": "node scripts/tunnel.mjs",
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
+    "desktop:dev": "npm run build && electron desktop/main.mjs",
+    "desktop:dir": "npm run build && electron-builder --dir",
+    "desktop:dist": "npm run build && electron-builder",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "smoke": "node scripts/smoke.mjs",
@@ -43,6 +47,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "sharp": "0.35.5",
+    "tsx": "^4.23.15",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
@@ -51,9 +56,47 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.6",
+    "electron": "^39.1.0",
+    "electron-builder": "^26.0.12",
     "playwright-core": "^1.64.1",
-    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.5"
+  },
+  "build": {
+    "appId": "com.infinode.app",
+    "productName": "Infinode",
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "server/**/*",
+      "shared/**/*",
+      "presets/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/tsx/**/*",
+      "node_modules/esbuild/**/*",
+      "node_modules/@esbuild/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "category": "Graphics",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   }
 }

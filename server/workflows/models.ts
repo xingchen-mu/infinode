@@ -29,7 +29,13 @@ export const SLOTS = {
     candidates: ['qwen3vl_8b_int8_convrot.safetensors', 'qwen3vl_8b_bf16.safetensors'],
     pattern: /qwen3[_-]?vl[_-]?8b.*\.safetensors$/i,
   },
-  'qwen.vae': { node: 'VAELoader', input: 'vae_name', candidates: ['qwen_image_2.1_vae_bf16.safetensors'], pattern: /qwen[_-]image[_-]2\.1[_-]vae.*\.safetensors$/i },
+  // The texture-fix finetune decodes without the checkerboard grid on skin and fine texture, at no extra cost.
+  'qwen.vae': {
+    node: 'VAELoader',
+    input: 'vae_name',
+    candidates: ['texture_fix_vae_for_qwen_image_2.1_bf16.safetensors', 'qwen_image_2.1_vae_bf16.safetensors'],
+    pattern: /qwen[_-]image[_-]2\.1[_-]vae.*\.safetensors$/i,
+  },
 
   'seedvr2.dit': {
     node: 'SeedVR2LoadDiTModel',

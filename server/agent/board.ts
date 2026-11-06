@@ -1,9 +1,9 @@
 import { nanoid } from 'nanoid';
 import type { AssetInfo, CanvasItem, Capabilities, MediaKind, Project, Task, TaskRequest, WorkflowLike } from '../../shared/types.ts';
-import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../src/lib/geometry.ts';
-import type { AssetStore } from '../assets.ts';
-import type { ItemsPatch, ProjectStore } from '../projects.ts';
-import type { TaskManager } from '../tasks.ts';
+import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../shared/geometry.ts';
+import type { AssetStore } from '../assets/store.ts';
+import type { ItemsPatch, ProjectStore } from '../projects/store.ts';
+import type { TaskManager } from '../tasks/manager.ts';
 import { msg } from '../../shared/i18n.ts';
 import { blockReason, isBlock } from '../../shared/licenses.ts';
 import { featureKey } from '../workflows/index.ts';

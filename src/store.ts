@@ -1,5 +1,6 @@
+import { type ComposerSettings, loadComposer, saveComposer } from './generation/settings';
 import { create } from 'zustand';
-import type { Capabilities, CanvasItem, CustomWorkflow, ImageQuality, PresetInfo, Task, VideoQuality, Viewport, WorkflowDraft } from '../shared/types';
+import type { Capabilities, CanvasItem, CustomWorkflow, PresetInfo, Task, Viewport, WorkflowDraft } from '../shared/types';
 import { msg } from '../shared/i18n';
 
 export type Tool = 'select' | 'hand';
@@ -15,22 +16,6 @@ export interface Toast {
   id: number;
   text: string;
   tone: 'info' | 'error' | 'success';
-}
-
-export interface ComposerSettings {
-  mode: 'image' | 'video';
-  /** Built-in id ('qwen', 'zimage') or 'custom:<workflow id>'. */
-  imageModel: string;
-  /** Built-in id ('minimax', 'minimax-ref') or 'custom:<workflow id>'. */
-  videoModel: string;
-  imageAspect: string;
-  videoAspect: string;
-  imageQuality: ImageQuality;
-  videoQuality: VideoQuality;
-  count: number;
-  duration: number;
-  /** Last values of imported workflows' parameters: workflow id → input id → value. */
-  params: Record<string, Record<string, string | number | boolean>>;
 }
 
 export interface State {
@@ -71,33 +56,6 @@ for (const key of ['last-project', 'composer', 'links']) {
   if (old === null) continue;
   if (localStorage.getItem(`infinode:${key}`) === null) localStorage.setItem(`infinode:${key}`, old);
   localStorage.removeItem(`comfy-canva:${key}`);
-}
-
-const COMPOSER_KEY = 'infinode:composer';
-const defaultComposer: ComposerSettings = {
-  mode: 'image',
-  imageModel: 'qwen',
-  videoModel: 'minimax',
-  imageAspect: 'auto',
-  videoAspect: 'auto',
-  imageQuality: '1k',
-  videoQuality: '480p',
-  count: 1,
-  duration: 5,
-  params: {},
-};
-
-function loadComposer(): ComposerSettings {
-  try {
-    const saved = { ...defaultComposer, ...JSON.parse(localStorage.getItem(COMPOSER_KEY) ?? '{}') } as ComposerSettings;
-    // Unknown ids (e.g. a deleted workflow) fall back once the workflow list is loaded.
-    if (typeof saved.imageModel !== 'string') saved.imageModel = defaultComposer.imageModel;
-    if (typeof saved.videoModel !== 'string') saved.videoModel = defaultComposer.videoModel;
-    if (!saved.params || typeof saved.params !== 'object') saved.params = {};
-    return saved;
-  } catch {
-    return defaultComposer;
-  }
 }
 
 export const useStore = create<State>(() => ({
@@ -281,7 +239,7 @@ export function setWorkflows(workflows: CustomWorkflow[], presets = get().preset
 export function setComposer(patch: Partial<ComposerSettings>) {
   const composer = { ...get().composer, ...patch };
   set({ composer });
-  localStorage.setItem(COMPOSER_KEY, JSON.stringify(composer));
+  saveComposer(composer);
 }
 
 let toastId = 0;

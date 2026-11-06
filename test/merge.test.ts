@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CanvasItem } from '../shared/types.ts';
-import { mergeItems } from '../src/lib/merge.ts';
+import { mergeItems } from '../src/projects/merge.ts';
 
 const item = (id: string, x = 0, extra: Partial<CanvasItem> = {}): CanvasItem => ({ id, kind: 'image', x, y: 0, w: 10, h: 10, createdAt: 1, ...extra });
 const base = (...items: CanvasItem[]) => new Map(items.map((i) => [i.id, JSON.stringify(i)]));

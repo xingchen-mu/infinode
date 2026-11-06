@@ -8,8 +8,8 @@ import { test } from 'node:test';
 
 process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'infinode-agent-test-'));
 const { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } = await import('@earendil-works/pi-ai');
-const { AssetStore } = await import('../server/assets.ts');
-const { ProjectStore } = await import('../server/projects.ts');
+const { AssetStore } = await import('../server/assets/store.ts');
+const { ProjectStore } = await import('../server/projects/store.ts');
 const { AgentHub } = await import('../server/agent/runtime.ts');
 type Task = import('../shared/types.ts').Task;
 type TaskRequest = import('../shared/types.ts').TaskRequest;

@@ -2,10 +2,10 @@ import { AlertTriangle, Loader2, RotateCcw, Trash2, Volume2, X } from 'lucide-re
 import { memo, useEffect, useRef, useState } from 'react';
 import { thumbUrl } from '../../shared/media';
 import type { CanvasItem, Task } from '../../shared/types';
-import { cancel, retry } from '../lib/actions';
+import { cancel, retry } from '../generation/tasks';
 import { api } from '../lib/api';
 import { patchItem, removeItems, updateItems, useStore } from '../store';
-import { Markdown } from '../ui/Markdown';
+import { Markdown } from '../components/Markdown';
 import { t } from '../i18n';
 
 function Elapsed({ since }: { since: number }) {

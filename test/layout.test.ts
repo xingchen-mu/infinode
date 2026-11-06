@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 import type { CanvasItem, Project, Task, TaskRequest } from '../shared/types.ts';
 import { type BatchJob, type CanvasDeps, launchBatch } from '../server/agent/board.ts';
-import { GAP, intersects, placeRow, visibleRect } from '../src/lib/geometry.ts';
+import { GAP, intersects, placeRow, visibleRect } from '../shared/geometry.ts';
 
 const img = (id: string, x: number, y: number, w = 512, h = 288): CanvasItem => ({ id, kind: 'image', x, y, w, h, createdAt: 1, asset: { id: `a-${id}`, url: '', kind: 'image', mime: 'image/png', width: 1376, height: 768 } });
 

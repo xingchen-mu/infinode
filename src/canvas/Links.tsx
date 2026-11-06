@@ -1,7 +1,7 @@
 import type { CanvasItem } from '../../shared/types';
-import { IMAGE_LONG_SIDE, VIDEO_LONG_SIDE, inputIds } from '../lib/actions';
-import { type Rect, displaySize } from '../lib/geometry';
-import { aspectValue } from '../lib/models';
+import { IMAGE_LONG_SIDE, VIDEO_LONG_SIDE, inputIds } from './items';
+import { type Rect, displaySize } from '../../shared/geometry';
+import { aspectValue } from '../generation/models';
 import { useStore } from '../store';
 import { t } from '../i18n';
 

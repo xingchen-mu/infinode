@@ -1,7 +1,8 @@
 import { Brush, Eraser, Loader2, Trash2, Undo2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
-import { maskedEdit, runWorkflow } from '../lib/actions';
+import { maskedEdit } from '../generation/edits';
+import { runWorkflow } from '../workflows/actions';
 import { api } from '../lib/api';
 import { toast, useStore } from '../store';
 import { t } from '../i18n';

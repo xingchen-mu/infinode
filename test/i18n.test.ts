@@ -6,8 +6,8 @@ import { EN } from '../shared/locales/en.ts';
 import { CJK, scanFile, sourceFiles } from './i18n-scan.ts';
 
 // Everything the user reads goes through t(). The assistant's prompt, tool descriptions and tool results
-// are for the model and stay in Chinese (server/agent, server/mcp.ts), so only their t() calls are checked.
-const UI = (p: string) => p.startsWith('src/') || p.startsWith('server/workflows/') || (/^server\/[^/]+\.ts$/.test(p) && p !== 'server/mcp.ts');
+// are for the model and stay in Chinese (server/agent/, server/mcp/), so only their t() calls are checked.
+const UI = (p: string) => p.startsWith('src/') || (p.startsWith('server/') && !p.startsWith('server/agent/') && !p.startsWith('server/mcp/'));
 
 function scan() {
   const keys = new Set<string>();

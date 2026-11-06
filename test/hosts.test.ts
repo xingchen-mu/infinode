@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { allowedHost } from '../server/hosts.ts';
+import { allowedHost } from '../server/http/hosts.ts';
 
 test('local names and IP addresses are allowed', () => {
   for (const h of ['localhost', 'localhost:8787', '127.0.0.1:8787', '[::1]:8787', '192.168.1.20:8787', '10.0.0.5', 'app.localhost:5173']) {

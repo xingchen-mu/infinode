@@ -9,7 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { imageSize } from 'image-size';
-import { ComfyClient, historyError, historyFiles } from '../server/comfy.ts';
+import { ComfyClient, historyError, historyFiles } from '../server/comfy/client.ts';
 import { buildWorkflow } from '../server/workflows/index.ts';
 import type { TaskRequest } from '../shared/types.ts';
 

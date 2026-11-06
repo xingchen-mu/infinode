@@ -2,9 +2,12 @@ import { Brush, Camera, Clapperboard, Download, Eraser, Expand, Maximize2, Penci
 import { useState } from 'react';
 import { isBlock } from '../../shared/licenses';
 import type { CanvasItem, WorkflowLike } from '../../shared/types';
-import { captureFrame, download, promptOptional, regenerate, removeBackground, runWorkflow, upscale } from '../lib/actions';
-import { toScreen } from '../lib/geometry';
-import { unavailableReason } from '../lib/models';
+import { captureFrame, download } from '../assets/actions';
+import { promptOptional, runWorkflow } from '../workflows/actions';
+import { regenerate } from '../generation/tasks';
+import { removeBackground, upscale } from '../generation/edits';
+import { toScreen } from '../../shared/geometry';
+import { unavailableReason } from '../generation/models';
 import { removeItems, select, setComposer, toast, useStore } from '../store';
 import { t } from '../i18n';
 

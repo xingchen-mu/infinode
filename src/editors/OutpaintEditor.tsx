@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { create } from 'zustand';
 import type { CanvasItem } from '../../shared/types';
-import { outpaint } from '../lib/actions';
-import { type Rect, toScreen, toWorld } from '../lib/geometry';
-import { aspectValue } from '../lib/models';
+import { outpaint } from '../generation/edits';
+import { type Rect, toScreen, toWorld } from '../../shared/geometry';
+import { aspectValue } from '../generation/models';
 import { useStore } from '../store';
 import { t } from '../i18n';
 
