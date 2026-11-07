@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { AssetInfo, CustomWorkflow, Task, TaskRequest } from '../../shared/types.ts';
 import { type AssetStore, type StoredAsset, mimeFor, publicAsset } from '../assets/store.ts';
-import { type ComfyClient, type ComfyEvent, INTERRUPTED, historyError, historyFiles } from '../comfy/client.ts';
+import { type ComfyClient, type ComfyEvent, INTERRUPTED, type QueueState, historyError, historyFiles } from '../comfy/client.ts';
 import { config } from '../config.ts';
 import { type BuiltWorkflow, type Stage, randomSeed } from '../workflows/graph.ts';
 import { fixModelPaths } from '../workflows/custom.ts';
@@ -54,6 +54,13 @@ export class TaskManager extends EventEmitter {
   private readonly file = join(config.dataDir, 'tasks.json');
   private saveTimer?: NodeJS.Timeout;
   private queueTimer?: NodeJS.Timeout;
+  /** When the websocket last delivered anything. */
+  private lastWsAt = 0;
+  /** The queue as the last poll saw it. */
+  private lastQueue?: { signature: string; at: number };
+  /** The queue changed after this time, and ComfyUI's broadcast about it has not arrived yet. */
+  private silentSince?: number;
+  private lastReconnectAt = 0;
 
   constructor(
     private comfy: ComfyClient,
@@ -195,7 +202,10 @@ export class TaskManager extends EventEmitter {
     const promptId = randomUUID();
     this.byPrompt.set(promptId, job.task.id);
     try {
+      const sentAt = Date.now();
       await this.comfy.queuePrompt(wf.graph, promptId);
+      // ComfyUI broadcasts the new queue length to every socket; checkQueue() makes sure ours heard it.
+      if (this.comfy.online) this.silentSince ??= sentAt;
     } catch (err) {
       // ComfyUI's HTTP server can stall for a minute while it loads models from a slow disk.
       // A timed-out reply does not mean the prompt was rejected: keep the id and let poll() find out.
@@ -239,6 +249,7 @@ export class TaskManager extends EventEmitter {
 
   /** Handles a ComfyUI websocket event. */
   onComfyEvent(e: ComfyEvent) {
+    this.lastWsAt = Date.now();
     if (e.type === 'status') {
       this.refreshQueueSoon();
       return;
@@ -401,6 +412,43 @@ export class TaskManager extends EventEmitter {
         /* ComfyUI offline; try again later */
       }
     }
+    await this.checkQueue();
+  }
+
+  /**
+   * Keeps queue positions right without relying on the websocket, and notices when the websocket has gone
+   * quiet: ComfyUI broadcasts every queue change, so a change the poll sees but the socket never reported means
+   * ComfyUI no longer sends to this socket (it can drop a reconnected clientId). Then open a fresh one.
+   */
+  private async checkQueue() {
+    if (![...this.tracked.values()].some((job) => ACTIVE.has(job.task.status) && job.task.promptId)) {
+      this.lastQueue = undefined;
+      this.silentSince = undefined;
+      return;
+    }
+    let q: QueueState;
+    try {
+      q = await this.comfy.queue();
+    } catch {
+      return; // offline
+    }
+    this.applyQueue(q);
+    const now = Date.now();
+    const signature = JSON.stringify([q.queue_running.map((i) => i[1]), q.queue_pending.map((i) => String(i[1])).sort()]);
+    const previous = this.lastQueue;
+    this.lastQueue = { signature, at: now };
+    if (this.silentSince !== undefined && this.lastWsAt >= this.silentSince) this.silentSince = undefined;
+    if (previous && previous.signature !== signature && this.lastWsAt < previous.at && this.silentSince === undefined) {
+      // Give the broadcast one more poll to arrive.
+      this.silentSince = previous.at;
+      return;
+    }
+    if (this.silentSince !== undefined && now - this.silentSince > 6000 && now - this.lastReconnectAt > 30_000 && this.comfy.online) {
+      console.warn('ComfyUI stopped sending progress to this client; reconnecting');
+      this.lastReconnectAt = now;
+      this.silentSince = undefined;
+      this.comfy.reconnect();
+    }
   }
 
   private refreshQueueSoon() {
@@ -409,22 +457,29 @@ export class TaskManager extends EventEmitter {
   }
 
   private async refreshQueue() {
-    const queued = [...this.tracked.values()].filter((job) => job.task.status === 'queued');
-    if (!queued.length) return;
+    if (![...this.tracked.values()].some((job) => job.task.status === 'queued')) return;
     try {
-      const q = await this.comfy.queue();
-      const pending = [...q.queue_pending].sort((a, b) => Number(a[0]) - Number(b[0])).map((i) => i[1]);
-      const running = q.queue_running.map((i) => i[1]);
-      for (const job of queued) {
-        const idx = pending.indexOf(job.task.promptId);
-        if (running.includes(job.task.promptId)) continue;
-        if (idx >= 0) {
-          const ahead = idx + running.length;
-          if (ahead !== job.task.queuePosition) this.update(job, { queuePosition: ahead, stage: ahead ? t('排队中 · 前面 {ahead} 个', { ahead }) : t('即将开始') });
-        }
-      }
+      this.applyQueue(await this.comfy.queue());
     } catch {
       /* offline */
+    }
+  }
+
+  /** Queue positions from ComfyUI's queue; a queued task ComfyUI has started is running. */
+  private applyQueue(q: QueueState) {
+    const pending = [...q.queue_pending].sort((a, b) => Number(a[0]) - Number(b[0])).map((i) => i[1]);
+    const running = q.queue_running.map((i) => i[1]);
+    for (const job of this.tracked.values()) {
+      if (job.task.status !== 'queued' || !job.task.promptId) continue;
+      if (running.includes(job.task.promptId)) {
+        this.update(job, { status: 'running', stage: t('运行中'), queuePosition: undefined, startedAt: Date.now() });
+        continue;
+      }
+      const idx = pending.indexOf(job.task.promptId);
+      if (idx >= 0) {
+        const ahead = idx + running.length;
+        if (ahead !== job.task.queuePosition) this.update(job, { queuePosition: ahead, stage: ahead ? t('排队中 · 前面 {ahead} 个', { ahead }) : t('即将开始') });
+      }
     }
   }
 

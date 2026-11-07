@@ -47,6 +47,7 @@ export type ComfyEvent = { type: string; data: Record<string, unknown> };
 export class ComfyClient {
   private ws?: WebSocket;
   private wsTimer?: NodeJS.Timeout;
+  private wsDelay = 1000;
   private closed = false;
   online = false;
 
@@ -156,27 +157,32 @@ export class ComfyClient {
     return this.json('/system_stats', {}, 10_000);
   }
 
-  /** Keeps a websocket open (reconnecting with backoff) and forwards JSON events. */
+  /**
+   * Keeps a websocket open (reconnecting with backoff) and forwards JSON events.
+   *
+   * ComfyUI keeps one socket per clientId and, when a socket closes, forgets that clientId even if a newer socket
+   * has taken it over. A new socket must therefore only open once the old one has closed, or it stays connected
+   * but never hears anything again (see reconnect()).
+   */
   connect(onEvent: (e: ComfyEvent) => void, onStatus: (online: boolean) => void) {
-    let delay = 1000;
     const open = () => {
       if (this.closed) return;
       const wsUrl = this.url(`/ws?clientId=${this.clientId}`).replace(/^http/, 'ws');
       const ws = new WebSocket(wsUrl);
       this.ws = ws;
       let ended = false;
-      // Once per socket, on error or close: Node 22 fires only error when the connection is refused.
+      // Once per socket, after it is gone: Node 22 fires only error when the connection is refused.
       const retry = () => {
         if (ended) return;
         ended = true;
         if (this.online) onStatus(false);
         this.online = false;
         if (this.closed) return;
-        this.wsTimer = setTimeout(open, delay);
-        delay = Math.min(delay * 2, 15_000);
+        this.wsTimer = setTimeout(open, this.wsDelay);
+        this.wsDelay = Math.min(this.wsDelay * 2, 15_000);
       };
       ws.onopen = () => {
-        delay = 1000;
+        this.wsDelay = 1000;
         this.online = true;
         onStatus(true);
       };
@@ -190,12 +196,20 @@ export class ComfyClient {
       };
       ws.onclose = retry;
       ws.onerror = () => {
-        retry();
-        // On Node 22, close() on a socket that never connected re-fires error and recurses.
-        if (ws.readyState === WebSocket.OPEN) ws.close();
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+          // Reconnect only once this socket has closed; give up waiting if the close never completes.
+          ws.close();
+          setTimeout(retry, 5000);
+        } else retry(); // never connected (on Node 22, close() here would re-fire error and recurse)
       };
     };
     open();
+  }
+
+  /** Drops the websocket and opens a new one after the old has closed (onclose schedules it). */
+  reconnect() {
+    this.wsDelay = 1000;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.close();
   }
 
   close() {
