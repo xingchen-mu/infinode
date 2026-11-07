@@ -17,6 +17,7 @@ import { registerEventsRoutes } from './routes/events.ts';
 import { registerProjectsRoutes } from './routes/projects.ts';
 import { registerAgentRoutes } from './routes/agent.ts';
 import { registerMcpRoutes } from './routes/mcp.ts';
+import { registerModelsRoutes } from './routes/models.ts';
 
 export function createApp(services: Services) {
   const app = new Hono();
@@ -44,6 +45,7 @@ export function createApp(services: Services) {
   registerProjectsRoutes(app, services);
   registerAgentRoutes(app, services);
   registerMcpRoutes(app, services);
+  registerModelsRoutes(app, services);
 
   if (config.production) {
     app.use('/*', serveStatic({ root: join(config.appRoot, 'dist') }));

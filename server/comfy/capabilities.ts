@@ -7,8 +7,10 @@ import { SettingsStore } from '../settings.ts';
 import { WorkflowStore } from '../workflows/store.ts';
 import { fixModelPaths, validateGraph } from '../workflows/custom.ts';
 import { REQUIREMENTS } from '../workflows/index.ts';
-import { missingFor, resolveModels } from '../workflows/models.ts';
+import { SLOTS, missingFor, missingSlots, resolveModels } from '../workflows/models.ts';
+import { buildCatalog, slotDownload } from '../models/catalog.ts';
 import { t } from '../i18n.ts';
+import type { ModelDownload } from '../../shared/types.ts';
 
 export type ObjectInfo = Awaited<ReturnType<ComfyClient['objectInfo']>>;
 /** Listed with a template's missing parts when the GPU cannot run its fp8 models. */
@@ -17,6 +19,22 @@ export const FP8_NOTE = msg('fp8 模型（当前 GPU 在 --enable-triton-backend
 /** What the connected ComfyUI can run; also picks model files for the built-in tools. */
 export function createCapabilities(comfy: ComfyClient, workflows: WorkflowStore, presets: PresetStore, settings: SettingsStore) {
   let capsCache: { at: number; value: Capabilities; info: ObjectInfo } | undefined;
+  let catalogCache: Map<string, ModelDownload> | undefined;
+  /** Model files with a download link (from the templates, which the built-in tools share). */
+  const catalog = () => (catalogCache ??= buildCatalog(presets.list().map((p) => p.models)));
+
+  /** Built-in tools that cannot run for lack of model files: those files, where a download is known. */
+  function downloads(features: Capabilities['features']): Record<string, ModelDownload[]> {
+    const out: Record<string, ModelDownload[]> = {};
+    for (const key of Object.keys(REQUIREMENTS)) {
+      if (!features[key]?.length) continue;
+      const files = missingSlots(key)
+        .map((slot) => slotDownload(SLOTS[slot], catalog()))
+        .filter((m): m is ModelDownload => Boolean(m));
+      if (files.length) out[key] = [...new Map(files.map((m) => [m.name, m])).values()];
+    }
+    return out;
+  }
 
   async function capabilities(force = false): Promise<Capabilities> {
     if (!force && capsCache && Date.now() - capsCache.at < 60_000 && capsCache.value.comfyUrl === comfy.baseUrl) return capsCache.value;
@@ -46,6 +64,7 @@ export function createCapabilities(comfy: ComfyClient, workflows: WorkflowStore,
         gpu: stats.devices[0]?.name?.replace(/^cuda:\d+\s*/, '').replace(/\s*:\s*cudaMallocAsync$/, ''),
         features: licensed(features),
         models: Object.fromEntries(Object.entries(models).filter(([, v]) => v)) as Record<string, string>,
+        downloads: downloads(features),
       };
       capsCache = { at: Date.now(), value, info };
       return value;
@@ -78,6 +97,7 @@ export function createCapabilities(comfy: ComfyClient, workflows: WorkflowStore,
 
   return {
     get: capabilities,
+    catalog,
     objectInfo,
     cached: () => capsCache?.value,
     cachedObjectInfo: () => capsCache?.value.comfyUrl === comfy.baseUrl ? capsCache.info : undefined,

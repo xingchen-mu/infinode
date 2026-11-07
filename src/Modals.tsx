@@ -7,6 +7,7 @@ import { AssetsModal } from './assets/AssetsModal';
 import { ItemDetailsModal } from './canvas/ItemDetailsModal';
 import { SnapshotsModal } from './projects/SnapshotsModal';
 import { OnboardingModal } from './onboarding/OnboardingModal';
+import { DownloadsModal } from './models/DownloadsModal';
 
 export function Modals() {
   const modal = useStore((s) => s.modal);
@@ -18,5 +19,6 @@ export function Modals() {
   if (modal.type === 'details') return <ItemDetailsModal itemId={modal.itemId} />;
   if (modal.type === 'snapshots') return <SnapshotsModal />;
   if (modal.type === 'onboarding') return <OnboardingModal />;
+  if (modal.type === 'downloads') return <DownloadsModal key={modal.names.join('\n')} names={modal.names} title={modal.title} back={modal.back} />;
   return <WorkflowEditor key={modal.id ?? 'new'} draft={modal.draft} id={modal.id} />;
 }

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { get } from 'node:http';
+import { get, request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -51,6 +51,15 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     req.on('error', reject);
     req.setTimeout(5000, () => req.destroy(new Error('Host check timed out')));
   });
+  const postStatusWithHost = (path: string, host: string, body: unknown) => new Promise<number | undefined>((resolve, reject) => {
+    const req = httpRequest(base + path, { method: 'POST', headers: { host, 'content-type': 'application/json' } }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error('Host check timed out')));
+    req.end(JSON.stringify(body));
+  });
 
   await t.test('offline APIs, host guard and local-only routes remain available', async () => {
     assert.equal((await (await request('/api/capabilities')).json()).comfyOnline, false);
@@ -69,6 +78,17 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     assert.equal(mcp.status, 200);
     assert.match(await mcp.text(), /serverInfo/);
     assert.equal((await request('/api/presence', 'PUT', { projectId: 'test-board', selection: [] })).status, 200);
+    // Model downloads: status for anyone, starting them only from this machine and only for known files.
+    const install = await (await request('/api/models/install')).json();
+    assert.deepEqual([install.mode, install.jobs], ['offline', []]);
+    assert.equal((await request('/api/models/plan', 'POST', { names: ['nothing.safetensors'] })).status, 400);
+    assert.equal((await request('/api/models/downloads', 'POST', { names: ['nothing.safetensors'] })).status, 400);
+    for (const path of ['/api/models/plan', '/api/models/downloads']) {
+      assert.equal(await postStatusWithHost(path, '192.0.2.1', { names: ['ae.safetensors'] }), 403);
+    }
+    const saved = await (await request('/api/settings', 'PUT', { modelSource: 'hf-mirror', hfToken: 'hf_secret' })).json();
+    assert.deepEqual([saved.settings.modelSource, saved.settings.hfTokenConfigured, JSON.stringify(saved).includes('hf_secret')], ['hf-mirror', true, false]);
+    assert.equal((await request('/api/settings', 'PUT', { modelSource: 'custom', modelEndpoint: '' })).status, 400);
   });
 
   await t.test('project saves, conflicts, events and deletion use the original JSON layout', async () => {

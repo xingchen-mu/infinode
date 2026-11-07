@@ -136,6 +136,11 @@ export const REQUIREMENTS: Record<string, Requirement> = {
   },
 };
 
+/** Model slots of a built-in tool with no file on the server, optional ones (speed-up LoRAs) included. */
+export function missingSlots(key: string): SlotKey[] {
+  return (REQUIREMENTS[key]?.slots ?? []).filter((slot) => !resolved[slot]);
+}
+
 /** What a built-in tool is missing on the server (empty = ready). */
 export function missingFor(key: string, info: ObjectInfo): string[] {
   const req = REQUIREMENTS[key];

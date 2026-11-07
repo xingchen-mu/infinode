@@ -15,6 +15,7 @@ import { ThumbStore } from './assets/thumbnails.ts';
 import { WorkflowStore } from './workflows/store.ts';
 import { createCapabilities } from './comfy/capabilities.ts';
 import { createEvents } from './events.ts';
+import { ModelInstaller } from './models/installer.ts';
 
 async function stableClientId() {
   const file = join(config.dataDir, 'comfy-client-id');
@@ -48,7 +49,15 @@ export async function createServices() {
   await Promise.all([assets.init(), projects.init(), workflows.init(), presets.init(), tasks.init(), thumbs.init()]);
 
   const events = createEvents();
-  const { projectEvents, agentEvents, revealEvents } = events;
+  const { projectEvents, agentEvents, revealEvents, downloadEvents } = events;
+  const models = new ModelInstaller({
+    comfy,
+    settings,
+    catalog: capabilities.catalog,
+    installed: () => capabilities.invalidate(),
+    emit: (job) => downloadEvents.emit(job),
+    sshHost: config.sshHost,
+  });
   let presence: Presence | undefined;
   const canvasDeps = {
     projects,
@@ -63,7 +72,7 @@ export async function createServices() {
   const mcp = new CanvasMcp(canvasDeps, () => presence, (projectId, ids) => revealEvents.emit({ projectId, ids }), process.env.npm_package_version ?? 'dev');
   await agent.init();
   return {
-    settings, comfy, assets, projects, workflows, presets, thumbs, tasks, agent, mcp, capabilities,
+    settings, comfy, assets, projects, workflows, presets, thumbs, tasks, agent, mcp, capabilities, models,
     ...events,
     setPresence: (next: Presence) => { presence = next; },
   };

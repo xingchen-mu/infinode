@@ -7,3 +7,10 @@ export const THUMB_PX = 768;
 export function thumbUrl(url: string): string {
   return url.replace(/^\/files\//, '/files/thumb/');
 }
+
+/** File sizes as people read them: 812 MB, 20.4 GB. */
+export function formatBytes(n: number): string {
+  if (n < 1024 ** 2) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(0)} MB`;
+  return `${(n / 1024 ** 3).toFixed(1)} GB`;
+}

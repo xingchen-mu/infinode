@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Copy, ExternalLink, Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Download, ExternalLink, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { msg } from '../../shared/i18n';
 import { LICENSES, licenseLabel, licenseTitle } from '../../shared/licenses';
@@ -9,6 +9,7 @@ import { missingNote } from '../generation/models';
 import { setComposer, toast, useStore } from '../store';
 import { rich, t } from '../i18n';
 import { Modal } from '../components/Modal';
+import { activeDownload, openDownloads } from '../models/actions';
 
 const close = () => useStore.setState({ modal: null });
 
@@ -19,8 +20,11 @@ const CATEGORY_KEY = 'infinode:template-category';
 
 function PresetCard({ p }: { p: PresetInfo }) {
   const caps = useStore((s) => s.caps);
+  const downloads = useStore((s) => s.downloads);
   const [open, setOpen] = useState(false);
   const [copying, setCopying] = useState(false);
+  const downloadable = p.missing.models.filter((m) => m.url);
+  const downloading = Object.values(downloads).some((j) => activeDownload(j) && downloadable.some((m) => m.name === j.name));
   const online = caps?.comfyOnline;
   const ready = online && !p.missing.nodes.length && !p.missing.models.length && !p.missing.notes.length;
   const missingCount = p.missing.nodes.length + p.missing.models.length + p.missing.notes.length;
@@ -101,12 +105,18 @@ function PresetCard({ p }: { p: PresetInfo }) {
                 <code>{m.name}</code>
                 {m.directory && <> → <code>models/{m.directory}/</code></>}
                 {m.url && (
-                  <a href={m.url} target="_blank" rel="noreferrer" title={t('下载')}>
+                  <a href={m.url} target="_blank" rel="noreferrer" title={t('在浏览器里打开下载地址')}>
                     <ExternalLink />
                   </a>
                 )}
               </div>
             ))}
+            {downloadable.length > 0 && (
+              <button className="btn ghost small tpl-download" onClick={() => openDownloads(downloadable.map((m) => m.name), t(p.name))}>
+                {downloading ? <Loader2 className="spin" /> : <Download />}
+                {downloading ? t('正在下载，查看进度') : t('一键下载缺少的模型（{n}）', { n: downloadable.length })}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -163,7 +173,7 @@ export function PresetsModal() {
       </div>
       {!presets.length && <div className="m-help">{t('没有找到模板文件（presets/ 目录）。')}</div>}
       <div className="m-help tpl-note">
-        {rich(t('缺少的模型下载后放到 ComfyUI 对应的 {0} 文件夹，重启 ComfyUI 或刷新即可。同名但精度不同（int8 / bf16 / fp8）或放在子文件夹里的模型会自动识别。'), [<code>models/…</code>])}
+        {rich(t('缺少的模型可以一键下载到 ComfyUI 的模型目录（支持 hf-mirror 镜像，在设置里选下载源），也可以手动下载后放到对应的 {0} 文件夹。同名但精度不同（int8 / bf16 / fp8）或放在子文件夹里的模型会自动识别。'), [<code>models/…</code>])}
       </div>
     </Modal>
   );

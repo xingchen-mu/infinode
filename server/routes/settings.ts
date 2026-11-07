@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { isLang } from '../../shared/i18n.ts';
 import { ComfyClient } from '../comfy/client.ts';
-import { normalizeComfyUrl } from '../settings.ts';
+import { isModelSource, normalizeComfyUrl } from '../settings.ts';
+import { normalizeEndpoint } from '../models/sources.ts';
 import { RequestError } from '../workflows/index.ts';
 import { t } from '../i18n.ts';
 import type { Services } from '../services.ts';
 
-export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, capabilities, agent }: Pick<Services, 'settings' | 'comfy' | 'assets' | 'capabilities' | 'agent'>) {
+export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, capabilities, agent, models }: Pick<Services, 'settings' | 'comfy' | 'assets' | 'capabilities' | 'agent' | 'models'>) {
   app.get('/api/settings', (c) => c.json(settings.value));
 
   /** Checks an address without saving it. */
@@ -39,6 +40,10 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
       agentVision?: boolean;
       agentThinking?: string;
       agentApprovalMode?: 'risky' | 'always';
+      modelSource?: unknown;
+      modelEndpoint?: string;
+      hfToken?: string;
+      clearHfToken?: boolean;
     }>();
     if (isLang(body.language) && body.language !== settings.value.language) {
       await settings.save({ language: body.language });
@@ -60,7 +65,26 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         assets.forgetComfyNames();
         comfy.setBaseUrl(url);
         capabilities.invalidate();
+        models.invalidate();
       }
+    }
+    if (body.modelSource !== undefined || body.modelEndpoint !== undefined || body.hfToken !== undefined || body.clearHfToken === true) {
+      if (body.modelSource !== undefined && !isModelSource(body.modelSource)) throw new RequestError(t('未知的下载源'));
+      let endpoint: string | undefined;
+      if (typeof body.modelEndpoint === 'string') {
+        try {
+          endpoint = body.modelEndpoint.trim() ? normalizeEndpoint(body.modelEndpoint) : '';
+        } catch (err) {
+          throw new RequestError(t('地址格式不对：{message}', { message: (err as Error).message }));
+        }
+      }
+      if (body.modelSource === 'custom' && !(endpoint ?? settings.value.modelEndpoint)) throw new RequestError(t('请填写自定义下载地址'));
+      await settings.saveModelConfig({
+        source: body.modelSource as typeof settings.value.modelSource,
+        endpoint,
+        hfToken: typeof body.hfToken === 'string' ? body.hfToken : undefined,
+        clearHfToken: body.clearHfToken === true,
+      });
     }
     const agentChanged = body.agentModel !== undefined || body.agentBaseUrl !== undefined || body.agentApiKey !== undefined || body.clearAgentApiKey === true || body.agentVision !== undefined || body.agentThinking !== undefined || body.agentApprovalMode !== undefined;
     if (agentChanged) {

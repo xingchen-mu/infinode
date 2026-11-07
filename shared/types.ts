@@ -116,6 +116,8 @@ export interface Capabilities {
   features: Record<string, string[]>;
   /** Model files picked for built-in tools, by slot (e.g. "qwen.unet"). */
   models: Record<string, string>;
+  /** Built-in tools: missing model files that can be downloaded, by capability id. */
+  downloads?: Record<string, ModelDownload[]>;
 }
 
 // ------------------------------------------------------------------ imported workflows
@@ -221,6 +223,73 @@ export interface ModelDownload {
   directory: string;
 }
 
+/**
+ * Where model downloads come from. Hugging Face links are fetched from the chosen endpoint;
+ * 'auto' tries Hugging Face and hf-mirror.com in turn and remembers the one that answered.
+ */
+export type ModelSource = 'auto' | 'huggingface' | 'hf-mirror' | 'custom';
+
+/**
+ * How downloaded files reach ComfyUI's models folders: written directly (ComfyUI is on this machine),
+ * fetched by the ComfyUI server itself over SSH (SSH_HOST), or by the user with the commands shown.
+ */
+export type ModelInstallMode = 'local' | 'ssh' | 'manual' | 'offline';
+
+export interface ModelDownloadJob {
+  id: string;
+  name: string;
+  directory: string;
+  status: 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+  received: number;
+  total?: number;
+  /** Bytes per second while running. */
+  speed?: number;
+  /** Full path of the file on the ComfyUI machine. */
+  path?: string;
+  /** Host the file came from, e.g. "hf-mirror.com". */
+  source?: string;
+  /** The file was already there. */
+  existed?: boolean;
+  error?: string;
+  createdAt: number;
+  finishedAt?: number;
+}
+
+export interface ModelInstallInfo {
+  mode: ModelInstallMode;
+  /** SSH host alias, in 'ssh' mode. */
+  host?: string;
+  /** Why files cannot be installed automatically ('manual' / 'offline'). */
+  reason?: string;
+  source: ModelSource;
+  /** Endpoint for 'custom' (e.g. an in-house mirror). */
+  endpoint?: string;
+  hfTokenConfigured: boolean;
+  jobs: ModelDownloadJob[];
+}
+
+/** What a download would do, shown before it starts. */
+export interface ModelInstallPlan {
+  mode: ModelInstallMode;
+  host?: string;
+  reason?: string;
+  files: {
+    name: string;
+    directory: string;
+    /** Target path on the ComfyUI machine (relative to the ComfyUI folder when unknown). */
+    path: string;
+    url: string;
+    size?: number;
+    exists?: boolean;
+    /** Why this file could not be checked or cannot be downloaded. */
+    error?: string;
+  }[];
+  /** Free space where the files go, when known. */
+  free?: number;
+  /** Shell commands that download the files by hand. */
+  commands: string;
+}
+
 /** An official ComfyUI template packaged as a ready-made tool (presets/*.json). */
 export interface PresetInfo extends Omit<CustomWorkflow, 'graph'> {
   preset: true;
@@ -248,6 +317,12 @@ export interface Settings {
   /** Whether the assistant asks before every write operation. */
   agentApprovalMode?: 'risky' | 'always';
   agentApiKeyConfigured?: boolean;
+  /** Where model downloads come from (see ModelSource). */
+  modelSource?: ModelSource;
+  /** Hugging Face compatible endpoint for modelSource 'custom'. */
+  modelEndpoint?: string;
+  /** A Hugging Face token is saved (for gated models). The token itself is never returned. */
+  hfTokenConfigured?: boolean;
 }
 
 /** Text items hold notes such as a script or a shot list. */

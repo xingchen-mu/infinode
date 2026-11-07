@@ -1,4 +1,4 @@
-import type { AgentEventData } from '../shared/types.ts';
+import type { AgentEventData, ModelDownloadJob } from '../shared/types.ts';
 
 export function createEvents() {
   return {
@@ -6,6 +6,7 @@ export function createEvents() {
     projectEvents: createChannel<{ id: string; updatedAt: number; by: string; deleted?: boolean }>(),
     agentEvents: createChannel<AgentEventData>(),
     revealEvents: createChannel<{ projectId: string; ids: string[] }>(),
+    downloadEvents: createChannel<ModelDownloadJob>(),
   };
 }
 

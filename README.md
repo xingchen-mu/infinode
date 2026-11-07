@@ -35,6 +35,7 @@ Infinode 只做画布，不包含、也不分发任何模型。用哪个模型�
 - **资产库**：集中浏览上传和生成的图片、视频，按类型和使用状态筛选，并反查资产所在的项目
 - **内置工具**：文生图、参考图编辑（多图）、局部重绘、消除、扩图、抠图（透明 PNG）、SeedVR2 超清、图生视频 / 文生视频 / 首尾帧 / 多图参考视频（MiniMax H3，自带声音）
 - **25 个官方模板**：从 ComfyUI 官方模板转换的预设（Qwen-Image、Z-Image、Flux.2、Krea 2、LTX-2.3、Wan 2.2、MiniMax H3、SeedVR2 …），装好模型就能用；缺什么模型、下载地址、放哪个文件夹都会写出来
+- **一键下载模型**：模板和内置工具缺的模型点一下就下载到 ComfyUI 的模型目录，支持 hf-mirror 镜像、断点续传；ComfyUI 在远程服务器上时通过 SSH 让服务器自己下载，不经过你的电脑
 - **导入你自己的工作流**：ComfyUI 里「导出 (API)」得到的 JSON 拖进来，自动识别提示词、图片输入、种子、尺寸和参数，导入后就是画布上的新工具
 - **本地部署**：页面和数据都在你自己的机器上；ComfyUI 可以在本机、局域网或远程服务器（支持自动 SSH 隧道）
 - **首次使用诊断**：启动时检查本地服务、ComfyUI、画布助手和官方模板，缺什么可以直接进入设置处理
@@ -212,6 +213,16 @@ tool_timeout_sec = 600   # 默认 60 秒；等出图、剪辑会更久
 
 模型名不完全一致也没关系：同一个模型的不同精度（int8 / bf16 / fp8）或放在子文件夹里的文件会被自动识别。
 
+## 下载模型
+
+模板卡片的「缺少 N 项」里有「一键下载缺少的模型」，设置页里缺模型的内置工具旁边有「下载模型」。点开后先列出每个文件要放到哪个目录、多大、磁盘还剩多少，确认后开始下载，进度和速度实时显示。
+
+- **下到哪里**：Infinode 向 ComfyUI 读取它的模型目录（包括 `extra_model_paths.yaml` 里配置的目录），每类模型放进第一个同名目录。ComfyUI 在本机时直接写入；在服务器上并且 `.env` 里设置了 `SSH_HOST` 时，通过 SSH 在服务器上运行下载（服务器需要 `python3`），文件不经过你的电脑；都不满足时给出可以复制到服务器上运行的 `curl` 命令。
+- **下载源**：设置 →「模型下载」里可以选「自动」「Hugging Face」「hf-mirror 镜像」或自定义的兼容地址。「自动」在中文界面先试 hf-mirror.com，连不上再试 huggingface.co（英文界面反过来），并记住能用的那个。环境变量 `HF_ENDPOINT`（如 `https://hf-mirror.com`）也会被识别。
+- **需要申请的模型**（如 FLUX.2 [dev]）：先在 Hugging Face 模型页面同意许可，再在设置里填 Hugging Face token（或设置环境变量 `HF_TOKEN`）。「自动」模式下 token 只发给 huggingface.co；选了 hf-mirror 或自定义地址时，token 会经过那个站点。
+- **断点续传**：文件先写成 `*.part`，网络断了会自动重试并接着下载；取消后已下载的部分会保留，下次接着下。只下载模板里列出的 `.safetensors` / `.gguf` 文件，不会下载能执行代码的 `.ckpt` / `.pt`。
+- 下载完 ComfyUI 会自动发现新文件，工具和模板的状态随即刷新。SeedVR2 的模型由它的插件在第一次运行时自己下载；缺少的自定义节点仍需在 ComfyUI Manager 里安装。
+
 模板是用 `scripts/build-presets.ts` 把官方模板在 ComfyUI 前端里导出成 API 格式、再整理参数生成的，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 导入你自己的工作流
@@ -274,6 +285,8 @@ Infinode 的许可证只管它自己的代码，你用的每个模型另有许�
 
 **助手提示没有配置 API key？** 在 `.env` 里加上对应的 key（DeepSeek 是 `DEEPSEEK_API_KEY`），然后重启 `npm run dev`。
 
+**一键下载很慢或连不上？** 在设置 →「模型下载」里把下载源换成「hf-mirror 镜像」。下载在 ComfyUI 所在的机器上进行，所以看的是那台机器的网络；断了重试会接着下载。
+
 **Codex 调用 Infinode 的工具时超时？** Codex 默认每次工具调用只等 60 秒。在 `config.toml` 里把 `tool_timeout_sec` 调大，或者让它分几次调用 `wait_for_items`（每次默认等 50 秒）。
 
 **改了 `PORT`？** MCP 地址跟着变成 `http://127.0.0.1:<PORT>/mcp`。
@@ -296,6 +309,7 @@ Infinode 是社区项目，与 Comfy Org 没有关联。ComfyUI 是 Comfy Org �
 
 - Built-in tools: text-to-image, multi-reference editing, inpaint, erase, outpaint, background removal, SeedVR2 upscaling, image/text/first-last-frame/reference-to-video with native audio (MiniMax H3)
 - 25 official ComfyUI templates as ready-made tools, with per-template model checks, download links and target folders
+- One-click model downloads into ComfyUI's model folders (including `extra_model_paths.yaml` ones), resumable, from Hugging Face, hf-mirror.com or any compatible endpoint (`HF_ENDPOINT` is honoured, `HF_TOKEN` for gated models). When ComfyUI runs on a server and `SSH_HOST` is set, the server downloads the files itself over SSH (it needs `python3`); otherwise you get `curl` commands to run there
 - Import any workflow from ComfyUI's **Export (API)**: prompts, image inputs, seed, size and parameters are detected and editable
 - Drag a line out of an image to place the next generation exactly where you want it
 - Canvas assistant: a chat panel that reads the board, looks at images, generates and runs your workflows, on DeepSeek, any other model [pi-ai](https://github.com/earendil-works/pi) supports, or any OpenAI-compatible endpoint (set the key in `.env`). It can take a short drama from a one-line idea to a cut: script and shot list as text notes, character and scene sheets, keyframes, one video per shot (after you approve the GPU time), then an edit (needs ffmpeg)

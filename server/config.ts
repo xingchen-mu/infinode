@@ -17,4 +17,6 @@ export const config = {
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean),
   production: process.env.NODE_ENV === 'production',
+  /** SSH host alias of the ComfyUI server (also used for the tunnel); model downloads run there. */
+  sshHost: (process.env.SSH_HOST ?? '').trim(),
 };

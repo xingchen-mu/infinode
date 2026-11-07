@@ -6,6 +6,7 @@ import { addFiles } from './assets/actions';
 import { duplicate } from './canvas/items';
 import { fitAll, revealItems } from './canvas/view';
 import { loadWorkflows } from './workflows/actions';
+import { applyDownload, loadDownloads } from './models/actions';
 import { viewportCenter } from '../shared/geometry';
 import { api, subscribeEvents } from './lib/api';
 import { CLIP_MARKER, copySelection, hasInternalClipboard, pasteInternal } from './canvas/clipboard';
@@ -168,6 +169,7 @@ export function App() {
       onReveal: (e) => {
         if (e.projectId === useStore.getState().projectId) void revealItems(e.ids);
       },
+      onDownload: applyDownload,
       onComfy: (online) => {
         useStore.setState({ comfyOnline: online });
         if (online) void refreshCaps(true);
@@ -178,6 +180,7 @@ export function App() {
         void syncTasks();
         refreshProject();
         void refreshAgent();
+        void loadDownloads();
       },
       onConnection: (ok) => {
         useStore.setState({ serverOnline: ok });

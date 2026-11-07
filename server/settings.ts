@@ -1,9 +1,10 @@
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Settings } from '../shared/types.ts';
+import type { ModelSource, Settings } from '../shared/types.ts';
 import { config } from './config.ts';
 import { isLang } from '../shared/i18n.ts';
 import { setServerLang, t } from './i18n.ts';
+import { MIRROR, OFFICIAL } from './models/sources.ts';
 
 export interface AgentConfig {
   model: string;
@@ -14,11 +15,22 @@ export interface AgentConfig {
   approvalMode: 'risky' | 'always';
 }
 
+export interface ModelDownloadConfig {
+  source: ModelSource;
+  /** For 'custom'. */
+  endpoint?: string;
+  hfToken?: string;
+}
+
+const MODEL_SOURCES: readonly ModelSource[] = ['auto', 'huggingface', 'hf-mirror', 'custom'];
+export const isModelSource = (v: unknown): v is ModelSource => MODEL_SOURCES.includes(v as ModelSource);
+
 /** Settings changed in the app (data/settings.json); .env only supplies the defaults. */
 export class SettingsStore {
   private readonly file = join(config.dataDir, 'settings.json');
   value: Settings = { comfyUrl: config.comfyUrl };
   private agentApiKey?: string;
+  private hfToken?: string;
 
   async init() {
     try {
@@ -31,8 +43,11 @@ export class SettingsStore {
       if (typeof saved.agentVision === 'boolean') this.value.agentVision = saved.agentVision;
       if (typeof saved.agentThinking === 'string' && saved.agentThinking.trim()) this.value.agentThinking = saved.agentThinking.trim();
       if (saved.agentApprovalMode === 'risky' || saved.agentApprovalMode === 'always') this.value.agentApprovalMode = saved.agentApprovalMode;
-      const raw = saved as Partial<Settings> & { agentApiKey?: unknown };
+      if (isModelSource(saved.modelSource)) this.value.modelSource = saved.modelSource;
+      if (typeof saved.modelEndpoint === 'string' && saved.modelEndpoint.trim()) this.value.modelEndpoint = saved.modelEndpoint.trim();
+      const raw = saved as Partial<Settings> & { agentApiKey?: unknown; hfToken?: unknown };
       if (typeof raw.agentApiKey === 'string' && raw.agentApiKey.trim()) this.agentApiKey = raw.agentApiKey.trim();
+      if (typeof raw.hfToken === 'string' && raw.hfToken.trim()) this.hfToken = raw.hfToken.trim();
     } catch {
       /* defaults */
     }
@@ -43,6 +58,40 @@ export class SettingsStore {
     if (!this.value.agentThinking && process.env.AGENT_THINKING?.trim()) this.value.agentThinking = process.env.AGENT_THINKING.trim();
     if (this.value.language) setServerLang(this.value.language);
     this.updateAgentKeyStatus();
+    this.updateHfTokenStatus();
+  }
+
+  /**
+   * Effective model download settings. Without a saved choice, HF_ENDPOINT (the variable huggingface_hub
+   * reads) picks a custom endpoint; otherwise 'auto'. HF_TOKEN works like a saved token.
+   */
+  modelConfig(): ModelDownloadConfig {
+    const hfToken = this.hfToken || process.env.HF_TOKEN?.trim() || undefined;
+    if (this.value.modelSource) {
+      return { source: this.value.modelSource, endpoint: this.value.modelSource === 'custom' ? this.value.modelEndpoint : undefined, hfToken };
+    }
+    const envEndpoint = process.env.HF_ENDPOINT?.trim().replace(/\/+$/, '');
+    if (envEndpoint === MIRROR) return { source: 'hf-mirror', hfToken };
+    if (envEndpoint === OFFICIAL) return { source: 'huggingface', hfToken };
+    if (envEndpoint) return { source: 'custom', endpoint: envEndpoint, hfToken };
+    return { source: 'auto', hfToken };
+  }
+
+  async saveModelConfig(patch: { source?: ModelSource; endpoint?: string; hfToken?: string; clearHfToken?: boolean }) {
+    if (patch.source) this.value.modelSource = patch.source;
+    if (patch.endpoint !== undefined) {
+      if (patch.endpoint) this.value.modelEndpoint = patch.endpoint;
+      else delete this.value.modelEndpoint;
+    }
+    if (patch.clearHfToken) this.hfToken = undefined;
+    if (patch.hfToken?.trim()) this.hfToken = patch.hfToken.trim();
+    this.updateHfTokenStatus();
+    await this.persist();
+    return this.value;
+  }
+
+  private updateHfTokenStatus() {
+    this.value.hfTokenConfigured = Boolean(this.hfToken || process.env.HF_TOKEN?.trim());
   }
 
   async save(patch: Partial<Settings>) {
@@ -101,7 +150,7 @@ export class SettingsStore {
   }
 
   private async persist() {
-    const saved = { ...this.value, ...(this.agentApiKey ? { agentApiKey: this.agentApiKey } : {}) };
+    const saved = { ...this.value, ...(this.agentApiKey ? { agentApiKey: this.agentApiKey } : {}), ...(this.hfToken ? { hfToken: this.hfToken } : {}) };
     await writeFile(`${this.file}.tmp`, JSON.stringify(saved, null, 1));
     await rename(`${this.file}.tmp`, this.file);
   }

@@ -1,6 +1,6 @@
 import { type ComposerSettings, loadComposer, saveComposer } from './generation/settings';
 import { create } from 'zustand';
-import type { Capabilities, CanvasItem, CustomWorkflow, PresetInfo, Task, Viewport, WorkflowDraft } from '../shared/types';
+import type { Capabilities, CanvasItem, CustomWorkflow, ModelDownloadJob, PresetInfo, Task, Viewport, WorkflowDraft } from '../shared/types';
 import { msg } from '../shared/i18n';
 
 export type Tool = 'select' | 'hand';
@@ -11,7 +11,18 @@ export interface EditMode {
   workflowId?: string;
 }
 
-export type Modal = null | { type: 'settings' } | { type: 'workflows' } | { type: 'presets' } | { type: 'assets' } | { type: 'details'; itemId: string } | { type: 'snapshots' } | { type: 'onboarding' } | { type: 'editor'; draft: WorkflowDraft; id?: string };
+export type Modal =
+  | null
+  | { type: 'settings' }
+  | { type: 'workflows' }
+  | { type: 'presets' }
+  | { type: 'assets' }
+  | { type: 'details'; itemId: string }
+  | { type: 'snapshots' }
+  | { type: 'onboarding' }
+  | { type: 'editor'; draft: WorkflowDraft; id?: string }
+  /** Downloading model files: `names` (none = just the list of downloads), for `title`; `back` reopens where it came from. */
+  | { type: 'downloads'; names: string[]; title?: string; back?: Modal };
 export interface Toast {
   id: number;
   text: string;
@@ -45,6 +56,8 @@ export interface State {
   pendingOutput: { from: string; at: { x: number; y: number } } | null;
   workflows: CustomWorkflow[];
   presets: PresetInfo[];
+  /** Model downloads by id (this session's, from the server). */
+  downloads: Record<string, ModelDownloadJob>;
   modal: Modal;
   /** Text item open for editing on the board. */
   noteEditing: string | null;
@@ -83,6 +96,7 @@ export const useStore = create<State>(() => ({
   pendingOutput: null,
   workflows: [],
   presets: [],
+  downloads: {},
   modal: null,
   noteEditing: null,
 }));

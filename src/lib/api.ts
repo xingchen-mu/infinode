@@ -5,6 +5,10 @@ import type {
   AssetInfo,
   Capabilities,
   CustomWorkflow,
+  ModelDownloadJob,
+  ModelInstallInfo,
+  ModelInstallPlan,
+  ModelSource,
   PresetInfo,
   Project,
   ProjectSnapshotSummary,
@@ -25,6 +29,12 @@ export type AgentSettingsPatch = {
   agentVision?: boolean;
   agentThinking?: string;
   agentApprovalMode?: 'risky' | 'always';
+};
+export type ModelSettingsPatch = {
+  modelSource?: ModelSource;
+  modelEndpoint?: string;
+  hfToken?: string;
+  clearHfToken?: boolean;
 };
 
 /** Identifies this tab's own board saves, so their change events are not merged back in. */
@@ -114,7 +124,7 @@ export const api = {
   branchProject: (id: string, snapshotId: string, name?: string) => request<Project>(`/api/projects/${id}/branches`, json('POST', { snapshotId, name })),
 
   settings: () => request<Settings>('/api/settings'),
-  saveSettings: (patch: Partial<Settings> & AgentSettingsPatch) =>
+  saveSettings: (patch: Partial<Settings> & AgentSettingsPatch & ModelSettingsPatch) =>
     request<{ settings: Settings; capabilities: Capabilities }>('/api/settings', json('PUT', patch)),
   testComfy: (comfyUrl: string) =>
     request<{ ok: boolean; url?: string; version?: string; gpu?: string; error?: string }>('/api/settings/test', json('POST', { comfyUrl })),
@@ -138,6 +148,12 @@ export const api = {
   presence: (body: { projectId: string; selection: string[]; view: { x: number; y: number } }) =>
     request<{ ok: true }>('/api/presence', json('PUT', body)),
   approveAgent: (projectId: string, id: string, ok: boolean) => request<{ ok: true }>(`/api/agent/${projectId}/approve`, json('POST', { id, ok })),
+
+  modelInstall: () => request<ModelInstallInfo>('/api/models/install'),
+  modelDownloads: () => request<ModelDownloadJob[]>('/api/models/downloads'),
+  planModels: (names: string[]) => request<ModelInstallPlan>('/api/models/plan', json('POST', { names })),
+  downloadModels: (names: string[]) => request<ModelDownloadJob[]>('/api/models/downloads', json('POST', { names })),
+  cancelDownload: (id: string) => request<ModelDownloadJob>(`/api/models/downloads/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
 };
 
 export interface EventHandlers {
@@ -148,6 +164,8 @@ export interface EventHandlers {
   onAgent(e: AgentEventData): void;
   /** Items an outside agent just made, to bring into view. */
   onReveal(e: { projectId: string; ids: string[] }): void;
+  /** A model download started, moved on or ended. */
+  onDownload(job: ModelDownloadJob): void;
   onConnection(ok: boolean): void;
 }
 
@@ -163,6 +181,7 @@ export function subscribeEvents(h: EventHandlers): () => void {
   es.addEventListener('project', (e) => h.onProject(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('agent', (e) => h.onAgent(JSON.parse((e as MessageEvent).data)));
   es.addEventListener('reveal', (e) => h.onReveal(JSON.parse((e as MessageEvent).data)));
+  es.addEventListener('download', (e) => h.onDownload(JSON.parse((e as MessageEvent).data)));
   es.onerror = () => h.onConnection(false);
   return () => es.close();
 }
