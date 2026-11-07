@@ -52,7 +52,7 @@ const projects = new ProjectStore();
 const assets = new AssetStore();
 await Promise.all([projects.init(), assets.init()]);
 
-async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; commercial?: boolean } = {}) {
+async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; commercial?: boolean; approvalMode?: 'always' } = {}) {
   const faux = fauxProvider({ provider: 'faux', models: [{ id: 'faux-1', input: ['text', 'image'], contextWindow: 200_000 }] });
   faux.setResponses(responses);
   const models = createModels();
@@ -66,7 +66,10 @@ async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], o
     changed: () => {},
     commercialOnly: () => Boolean(opts.commercial),
   } as unknown as ConstructorParameters<typeof AgentHub>[0];
-  const hub = new AgentHub(deps, () => {}, { models, model: 'faux/faux-1', compactAt: opts.compactAt });
+  const settings = opts.approvalMode
+    ? ({ agentConfig: () => ({ model: 'faux/faux-1', vision: true, thinking: 'low', approvalMode: opts.approvalMode }) } as ConstructorParameters<typeof AgentHub>[3])
+    : undefined;
+  const hub = new AgentHub(deps, () => {}, { models, model: 'faux/faux-1', compactAt: opts.compactAt }, settings);
   await hub.init();
   assert.equal(hub.status.ready, true, hub.status.reason ?? '');
   return { hub, faux };
@@ -208,6 +211,35 @@ test('a video card shows its first frames, submits a keyframe redone after it, a
   );
   await assert.rejects(hub.approve(board.id, cards[0].id, true));
   assert.equal(tasks.created.length, 1);
+});
+
+test('deleting finished images waits for its own card, also when every write needs approval, and then the model reads what was done', async () => {
+  const board = await projects.create('delete');
+  const shot = { id: 'img0000del', kind: 'image' as const, x: 0, y: 0, w: 512, h: 288, createdAt: 1, asset: { id: 'adel', url: '/files/adel.png', kind: 'image' as const, mime: 'image/png', width: 1376, height: 768 } };
+  await projects.patchItems(board.id, { upsert: [shot] });
+  let context = '';
+  const { hub } = await hubWith(
+    fakeTasks(),
+    [
+      fauxAssistantMessage(fauxToolCall('delete_items', { ids: [shot.id] })),
+      say('等你确认'),
+      (c) => {
+        context = JSON.stringify(c.messages);
+        return say('删好了');
+      },
+    ],
+    { approvalMode: 'always' },
+  );
+  await hub.send(board.id, { text: '把这张删了' });
+  const card = (await settled(hub, board.id)).entries.find((e) => e.kind === 'tool' && e.status === 'waiting');
+  assert.ok(card?.kind === 'tool' && card.approval?.confirm === '删除' && card.approval.frames?.[0] === shot.id, JSON.stringify(card));
+  assert.equal((await projects.get(board.id))!.items.length, 1);
+
+  await hub.approve(board.id, card.id, true);
+  assert.equal((await projects.get(board.id))!.items.length, 0);
+  await hub.send(board.id, { text: '删好了吗' });
+  await settled(hub, board.id);
+  assert.match(context, /用户已确认。已从画布删掉 1 个节点/);
 });
 
 test('commercial-only mode makes image generation default to Z-Image', async () => {

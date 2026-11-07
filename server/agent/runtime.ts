@@ -94,7 +94,7 @@ interface ToolDetails {
   summary?: string;
   items?: string[];
   /** `replaced`: a newer card of the same tool took its place before the user answered. */
-  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected' | 'replaced'; payload: Json; frames?: string[]; since?: number };
+  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected' | 'replaced'; payload: Json; frames?: string[]; since?: number; confirm?: string };
 }
 
 const AGENT_APPROVAL = '__infinode_agent_approval';
@@ -444,7 +444,7 @@ export class AgentHub {
       details.summary = t('没有确认');
       show();
       await this.save(s);
-      this.wake(s, t('用户没有确认「{title}」，什么都没提交。\n先别生成，问问用户想怎么调整。', { title: approval.title }));
+      this.wake(s, t('用户没有确认「{title}」，这一步没有执行。\n先别接着做，问问用户想怎么调整。', { title: approval.title }));
       return;
     }
     const pendingPayload = approval?.payload;
@@ -462,6 +462,8 @@ export class AgentHub {
           ? await tool.run(operation.args as Record<string, unknown>, this.context(s))
           : undefined;
       if (!out) throw new RequestError(t('这个请求已经不能执行了'));
+      // The model now reads what was done, not the "waiting for the user" it got when the card was made.
+      result.content = [{ type: 'text', text: `用户已确认。${out.text}` }];
       details.summary = out.summary;
       if (out.items?.length) details.items = out.items;
     } catch (err) {
@@ -668,8 +670,8 @@ export class AgentHub {
       description: def.description,
       parameters: Type.Unsafe(def.parameters as unknown as TSchema),
       execute: async (_id, args, signal, onUpdate) => {
-        // Video batches already provide a cost estimate and their own approval card.
-        if (this.approvalMode === 'always' && !def.readOnly && def.name !== 'batch_generate_videos') {
+        // Tools with their own card (video batches, deleting) already ask, with more to say than this one.
+        if (this.approvalMode === 'always' && !def.readOnly && !def.approve) {
           const summary = def.describe(args as Record<string, unknown>);
           return {
             content: [{ type: 'text', text: t('等待用户确认后再执行。') }],
@@ -819,8 +821,8 @@ export class AgentHub {
     if (!result) return { ...base, status: running ? 'running' : 'error', summary: running ? (def?.describe(args as Record<string, unknown>) ?? '') : t('没有完成') };
     if (result.isError) return { ...base, status: 'error', summary: clip(textOf(result.content), 300) };
     if (approval?.state === 'pending') {
-      const { title, detail, frames, since } = approval;
-      return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title, detail, ...(frames ? { frames, since } : {}) } };
+      const { title, detail, frames, since, confirm } = approval;
+      return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title, detail, ...(frames ? { frames, since } : {}), ...(confirm ? { confirm } : {}) } };
     }
     return { ...base, status: approval?.state === 'rejected' ? 'error' : 'done', summary: details.summary ?? '' };
   }

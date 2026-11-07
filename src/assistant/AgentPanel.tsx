@@ -238,7 +238,7 @@ function Approval({ id, approval }: { id: string; approval: NonNullable<Extract<
           {t('不要')}
         </button>
         <button className="btn primary small" disabled={busy} onClick={() => void answer(true)}>
-          {t('开始')}
+          {approval.confirm ?? t('开始')}
         </button>
       </div>
     </div>

@@ -518,8 +518,8 @@ export const EN: Record<string, Translation> = {
   找不到这个确认请求: 'This approval request was not found',
   这个请求已经处理过了: 'This request was already answered',
   没有确认: 'Declined',
-  '用户没有确认「{title}」，什么都没提交。\n先别生成，问问用户想怎么调整。':
-    'The user declined "{title}"; nothing was submitted.\nDo not generate yet; ask the user what to change.',
+  '用户没有确认「{title}」，这一步没有执行。\n先别接着做，问问用户想怎么调整。':
+    'The user declined "{title}"; that step was not carried out.\nDo not go on yet; ask the user what to change.',
   这个请求已经不能执行了: 'This request can no longer run',
   '已确认，正在提交…': 'Approved, submitting…',
   '提交失败：{message}': 'Submission failed: {message}',
@@ -611,6 +611,23 @@ export const EN: Record<string, Translation> = {
   取消生成: 'Cancel',
   '取消了 {n} 个，删掉 {removed} 个占位': '{n} cancelled, {removed} placeholders removed',
   '取消了 {n} 个': '{n} cancelled',
+  删除节点: 'Delete',
+  '删掉了 {n} 个': '{n} deleted',
+  '这些节点里没有已经生成好的图片或视频：还在生成的用 cancel_items，文本节点不能删':
+    'None of these items is a finished image or video: use cancel_items for ones still generating; text items cannot be deleted',
+  '删除 {n} 张图': ['Delete {n} image', 'Delete {n} images'],
+  '删除 {n} 段视频': ['Delete {n} video', 'Delete {n} videos'],
+  '删除 {images} 张图和 {videos} 段视频': 'Delete {images} images and {videos} videos',
+  '删掉后画布上撤销不了。文件还留在资产库里，可以从那里重新加回画布，但名字、连线和生成参数不会保留。':
+    'This cannot be undone on the board. The files stay in the asset library and can be added back from there, without their names, links or generation settings.',
+  移动节点: 'Move',
+  'positions 里的 x、y 要是数字': 'x and y in positions must be numbers',
+  '要传 ids（配 beside 或 dx / dy），或者传 positions': 'Pass ids (with beside or dx / dy), or positions',
+  'beside 的节点不能也在要移动的节点里': 'The beside item cannot be one of the items being moved',
+  '要传 beside，或者不全为 0 的 dx / dy': 'Pass beside, or a dx / dy that is not zero',
+  '移动了 {n} 个': '{n} moved',
+  排列节点: 'Arrange',
+  '排好了 {n} 个': '{n} arranged',
 
   // ---------------------------------------------------------------- server
   '不支持的文件类型: {name}': 'Unsupported file type: {name}',

@@ -24,6 +24,7 @@ import {
 import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
 import { GUIDES } from './guides.ts';
 import { redoneVersion } from '../../shared/frames.ts';
+import { type Arrangement, type Side, arrange, besideOf, clearOf } from './layout.ts';
 import { type Tile, concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
@@ -52,9 +53,10 @@ export interface ToolOutput {
   items?: string[];
   /**
    * Hold the work until the user agrees in the panel; then `approve(payload)` runs it. `frames`: first
-   * frames the card shows; `since`: when it was made, so frames redone later replace them.
+   * frames (or other items) the card shows; `since`: when it was made, so frames redone later replace them;
+   * `confirm`: the button's label, when not 开始.
    */
-  approval?: { title: string; detail: string; payload: Json; frames?: string[]; since?: number };
+  approval?: { title: string; detail: string; payload: Json; frames?: string[]; since?: number; confirm?: string };
 }
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -97,6 +99,20 @@ const MAX_LISTED = 300;
 const VIEWABLE = new Set(['image/png', 'image/jpeg', 'image/webp']);
 /** Videos review_items looks at in one call (three frames each). */
 const MAX_REVIEW_CLIPS = 8;
+/** Moved items whose old positions a result lists, so the model can put them back. */
+const MAX_RESTORE = 100;
+const SIDES: Side[] = ['right', 'left', 'below', 'above'];
+const ARRANGEMENTS: Arrangement[] = ['row', 'column', 'grid', 'groups'];
+const ARRANGED: Record<Arrangement, string> = { row: '一行', column: '一列', grid: '网格', groups: '按类型分列' };
+
+/** Where an item sits on the board and how large it is shown there. */
+const placed = (i: CanvasItem) => ` · 在画布 (${i.x},${i.y})，显示 ${i.w}×${i.h}`;
+
+/** The board cannot undo what the assistant moved: the result lists where things were. */
+const formerly = (items: CanvasItem[]) =>
+  items.length > MAX_RESTORE
+    ? `（共 ${items.length} 个，太多了，没有记下原位置）`
+    : `原位置（用户要放回去时，用 move_items 的 positions 照这些坐标放回）：${items.map((i) => `\`${i.id}\` (${i.x},${i.y})`).join('，')}`;
 
 const chunk = <T,>(xs: T[], size: number): T[][] => Array.from({ length: Math.ceil(xs.length / size) }, (_, i) => xs.slice(i * size, (i + 1) * size));
 
@@ -192,13 +208,29 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     };
   };
 
+  /** Takes finished items off the board; their files stay in the asset library. */
+  const deleteItems = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
+    const { ids: doomed } = payload as { ids: string[] };
+    const p = await readBoard(deps, ctx.projectId);
+    const present = doomed.filter((id) => p.items.some((i) => i.id === id));
+    if (present.length) await patchBoard(deps, ctx.projectId, { remove: present });
+    const gone = doomed.length - present.length;
+    return {
+      text:
+        `已从画布删掉 ${present.length} 个节点：${present.map((id) => `\`${id}\``).join(' ')}` +
+        (gone ? `（另有 ${gone} 个在确认前已经不在画布上了）` : '') +
+        '。文件还在资产库里，用户可以从那里加回画布。',
+      summary: t('删掉了 {n} 个', { n: present.length }),
+    };
+  };
+
   return [
     tool<{ ids?: string[] }>({
       name: 'read_board',
       readOnly: true,
       label: msg('读取画布'),
       description:
-        '列出画布上的节点：id、图片还是视频、名称、尺寸或生成状态、由哪些节点生成、提示词。传 ids 时只看这些节点，给出完整提示词和生成参数。',
+        '列出画布上的节点：id、图片还是视频、名称、尺寸或生成状态、由哪些节点生成、提示词，以及在画布上的位置（左上角坐标，x 向右、y 向下）和显示大小。传 ids 时只看这些节点，给出完整提示词和生成参数。',
       parameters: { type: 'object', properties: { ids: ids('只看这些节点（可选）') } },
       describe: (a) => (a.ids?.length ? t('{n} 个节点', { n: a.ids.length }) : t('全部节点')),
       async run(args, ctx) {
@@ -206,13 +238,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         if (args.ids?.length) {
           const items = findItems(p, args.ids);
           return {
-            text: items.map((i) => describeItem(deps, i, 4000) + settingsOf(i.request)).join('\n'),
+            text: items.map((i) => describeItem(deps, i, 4000) + placed(i) + settingsOf(i.request)).join('\n'),
             summary: t('{n} 个节点', { n: items.length }),
             items: items.map((i) => i.id),
           };
         }
         const shown = p.items.slice(-MAX_LISTED);
-        const lines = shown.map((i) => `- ${describeItem(deps, i)}`);
+        const lines = shown.map((i) => `- ${describeItem(deps, i)}${placed(i)}`);
         const more = p.items.length > shown.length ? `\n（只列出了最新的 ${shown.length} 个）` : '';
         return {
           text: p.items.length ? `画布「${p.name}」共 ${p.items.length} 个节点：\n${lines.join('\n')}${more}` : `画布「${p.name}」是空的`,
@@ -918,6 +950,165 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           text: (cancelled.length ? `已取消：${cancelled.map((id) => `\`${id}\``).join(' ')}` : '这些节点没有进行中的任务') + (removable.length ? `；已从画布删掉 ${removable.length} 个占位` : ''),
           summary: removable.length ? t('取消了 {n} 个，删掉 {removed} 个占位', { n: cancelled.length, removed: removable.length }) : t('取消了 {n} 个', { n: cancelled.length }),
           items: cancelled.filter((id) => !removable.includes(id)),
+        };
+      },
+    }),
+
+    tool<{ ids: string[] }>({
+      name: 'delete_items',
+      destructive: true,
+      label: msg('删除节点'),
+      description:
+        '把已经生成好的图片和视频从画布上删掉（用户说「删掉这几张」「不要的都删了」时）。' +
+        (host === 'panel' ? '会先在面板上弹确认卡，用户点了才删；调用后告诉用户在等他确认，然后结束这一轮。' : '会直接删除，先问过用户再调用。') +
+        '文件还留在资产库里，用户可以从那里加回画布，但节点的名字、类型、连线和生成参数不会保留，画布上也撤销不了。还在排队或生成中的用 cancel_items；文本节点不能用它删。',
+      parameters: {
+        type: 'object',
+        properties: { ids: { ...ids('要删的节点 id'), minItems: 1 } },
+        required: ['ids'],
+      },
+      describe: (a) => t('{n} 个节点', { n: a.ids?.length ?? 0 }),
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const items = findItems(p, [...new Set(args.ids)]);
+        const done = items.filter((i) => i.kind !== 'text' && stateOf(deps, i).done);
+        const kept = items.filter((i) => !done.includes(i));
+        if (!done.length) throw new Error(t('这些节点里没有已经生成好的图片或视频：还在生成的用 cancel_items，文本节点不能删'));
+        const skipped = kept.length
+          ? `\n没删：${kept.map((i) => `\`${i.id}\`（${i.kind === 'text' ? '文本节点' : '还没有结果，用 cancel_items'}）`).join('，')}`
+          : '';
+        const payload = { ids: done.map((i) => i.id) };
+        if (host === 'mcp') {
+          const out = await deleteItems(payload, ctx);
+          return { ...out, text: out.text + skipped };
+        }
+        const images = done.filter((i) => i.kind === 'image').length;
+        const videos = done.length - images;
+        return {
+          text: `已在面板上请用户确认删除 ${done.length} 个节点：${payload.ids.map((id) => `\`${id}\``).join(' ')}。用户点了才会删。现在告诉用户在等他确认，然后结束这一轮。${skipped}`,
+          summary: t('等待确认'),
+          approval: {
+            title: !videos
+              ? t('删除 {n} 张图', { n: images })
+              : !images
+                ? t('删除 {n} 段视频', { n: videos })
+                : t('删除 {images} 张图和 {videos} 段视频', { images, videos }),
+            detail: t('删掉后画布上撤销不了。文件还留在资产库里，可以从那里重新加回画布，但名字、连线和生成参数不会保留。'),
+            payload,
+            frames: payload.ids,
+            confirm: t('删除'),
+          },
+        };
+      },
+      approve: deleteItems,
+    }),
+
+    tool<{ ids?: string[]; beside?: string; side?: Side; dx?: number; dy?: number; positions?: { id: string; x: number; y: number }[] }>({
+      name: 'move_items',
+      label: msg('移动节点'),
+      description:
+        '移动画布上的节点（坐标是画布坐标，x 向右、y 向下，位置指左上角；现在的位置和大小用 read_board 看）。三种用法选一种：' +
+        '① ids + beside（另一个节点的 id）+ side（right / left / below / above，默认 right）：把这些节点整体放到那个节点旁边，彼此的相对位置不变，挡路的节点会自动让开；' +
+        '② ids + dx / dy：整体平移；' +
+        '③ positions：把每个节点放到给定坐标，比如放回原位。' +
+        '画布上撤销不了助手的移动，返回里记着原位置，用户要放回去时用 positions。',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: ids('要移动的节点 id（用法 ① ②）'),
+          beside: { type: 'string', description: '放到这个节点旁边（用法 ①）' },
+          side: { type: 'string', enum: SIDES, description: '放在 beside 节点的哪一边，默认 right' },
+          dx: { type: 'number', description: '向右移多少（负数向左）' },
+          dy: { type: 'number', description: '向下移多少（负数向上）' },
+          positions: {
+            type: 'array',
+            description: '每个节点的新位置（用法 ③）',
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' } },
+              required: ['id', 'x', 'y'],
+            },
+          },
+        },
+      },
+      describe: (a) => t('{n} 个节点', { n: a.positions?.length || a.ids?.length || 0 }),
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const at = new Map<string, { x: number; y: number }>();
+        let moved: CanvasItem[];
+        if (args.positions?.length) {
+          moved = findItems(p, [...new Set(args.positions.map((m) => m.id))]);
+          for (const m of args.positions) {
+            if (!Number.isFinite(m.x) || !Number.isFinite(m.y)) throw new Error(t('positions 里的 x、y 要是数字'));
+            at.set(m.id, { x: m.x, y: m.y });
+          }
+        } else {
+          if (!args.ids?.length) throw new Error(t('要传 ids（配 beside 或 dx / dy），或者传 positions'));
+          moved = findItems(p, [...new Set(args.ids)]);
+          const b = boundsOf(moved)!;
+          let dx: number;
+          let dy: number;
+          if (args.beside) {
+            if (args.ids.includes(args.beside)) throw new Error(t('beside 的节点不能也在要移动的节点里'));
+            const [anchor] = findItems(p, [args.beside]);
+            const side = SIDES.includes(args.side as Side) ? (args.side as Side) : 'right';
+            const ours = new Set(moved.map((i) => i.id));
+            const spot = clearOf(p.items.filter((i) => !ours.has(i.id)), besideOf(anchor, b, side), side);
+            dx = spot.x - b.x;
+            dy = spot.y - b.y;
+          } else {
+            dx = Number(args.dx ?? 0);
+            dy = Number(args.dy ?? 0);
+            if (!Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) throw new Error(t('要传 beside，或者不全为 0 的 dx / dy'));
+          }
+          for (const i of moved) at.set(i.id, { x: i.x + dx, y: i.y + dy });
+        }
+        await patchBoard(deps, ctx.projectId, {
+          upsert: moved.map((i) => ({ ...i, x: Math.round(at.get(i.id)!.x), y: Math.round(at.get(i.id)!.y) })),
+        });
+        const b = boundsOf(moved.map((i) => ({ ...i, ...at.get(i.id)! })))!;
+        return {
+          text: `已移动 ${moved.length} 个节点，现在整体在 (${Math.round(b.x)},${Math.round(b.y)})，占 ${Math.round(b.w)}×${Math.round(b.h)}。${formerly(moved)}`,
+          summary: t('移动了 {n} 个', { n: moved.length }),
+          items: moved.map((i) => i.id),
+        };
+      },
+    }),
+
+    tool<{ ids: string[]; layout: Arrangement; columns?: number; gap?: number }>({
+      name: 'arrange_items',
+      label: msg('排列节点'),
+      description:
+        '把这些节点重新排整齐，顺序就是 ids 的顺序（比如按镜头号排）。layout：row 排成一行（顶端对齐）；column 排成一列（左边对齐）；' +
+        'grid 排成网格（columns 列，不传就接近正方形）；groups 按类型（group）分列，同一类型从上到下一列，各列按类型第一次出现的顺序从左到右，没有类型的节点单独一列。' +
+        '排好的整块放在这些节点原来所在区域的左上角，挡到别的节点时往右让开。画布上撤销不了，返回里记着原位置，用户要放回去时用 move_items 的 positions。',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: { ...ids('要排的节点 id，按排列顺序', MAX_LISTED), minItems: 1 },
+          layout: { type: 'string', enum: ARRANGEMENTS },
+          columns: { type: 'integer', minimum: 1, description: 'grid 的列数' },
+          gap: { type: 'number', minimum: 0, description: `节点之间的间距，默认 ${GAP}` },
+        },
+        required: ['ids', 'layout'],
+      },
+      describe: (a) => t('{n} 个节点', { n: a.ids?.length ?? 0 }),
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const items = findItems(p, [...new Set(args.ids)]);
+        const layout = ARRANGEMENTS.includes(args.layout) ? args.layout : 'grid';
+        const gap = typeof args.gap === 'number' && Number.isFinite(args.gap) ? Math.min(Math.max(0, args.gap), 1000) : GAP;
+        const { positions, w, h } = arrange(items, layout, { columns: args.columns, gap });
+        const b = boundsOf(items)!;
+        const ours = new Set(items.map((i) => i.id));
+        const spot = clearOf(p.items.filter((i) => !ours.has(i.id)), { x: b.x, y: b.y, w, h }, 'right');
+        await patchBoard(deps, ctx.projectId, {
+          upsert: items.map((i, n) => ({ ...i, x: Math.round(spot.x + positions[n].x), y: Math.round(spot.y + positions[n].y) })),
+        });
+        return {
+          text: `已把 ${items.length} 个节点排成${ARRANGED[layout]}，整体在 (${Math.round(spot.x)},${Math.round(spot.y)})，占 ${Math.round(w)}×${Math.round(h)}。${formerly(items)}`,
+          summary: t('排好了 {n} 个', { n: items.length }),
+          items: items.map((i) => i.id),
         };
       },
     }),

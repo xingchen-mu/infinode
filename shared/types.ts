@@ -416,7 +416,8 @@ export type AgentEntry =
       /** `waiting`: held until the user approves it in the panel (`approval`). */
       status: 'running' | 'done' | 'error' | 'waiting';
       /** `frames`: first frames of the work held (video batches), shown on the card; `since`: when it was made. */
-      approval?: { title: string; detail: string; frames?: string[]; since?: number };
+      /** `confirm`: the button's label, when not 开始. */
+      approval?: { title: string; detail: string; frames?: string[]; since?: number; confirm?: string };
       /** One line on what the call is doing or did (or its error). */
       summary: string;
       /** Board items it made or looked at. */
