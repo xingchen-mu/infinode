@@ -8,7 +8,8 @@ const isDev = process.env.INFINODE_DESKTOP_DEV === '1';
 const devUrl = process.env.INFINODE_DEV_URL || 'http://127.0.0.1:5173';
 const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let backend;
-let backendUrl;
+/** The backend's URL once it answers; one backend per app, shared by every window. */
+let backendReady;
 let quitting = false;
 
 function freePort() {
@@ -25,10 +26,10 @@ function freePort() {
   });
 }
 
-async function waitForServer(url, child) {
+async function waitForServer(url, child, output) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    if (child?.exitCode != null) throw new Error(`本地服务提前退出（${child.exitCode}）`);
+    if (child?.exitCode != null) throw new Error(`本地服务提前退出（${child.exitCode}）${output() ? `：${output()}` : ''}`);
     try {
       const response = await fetch(`${url}/api/capabilities`, { signal: AbortSignal.timeout(800) });
       if (response.status < 500) return;
@@ -62,24 +63,51 @@ async function startBackend() {
     INFINODE_ENV_FILE: envFile,
     PRESETS_DIR: path.join(appPath, 'presets'),
     ELECTRON_RUN_AS_NODE: '1',
+    // The backend stops by itself if this process goes away without stopping it (crash, force quit).
+    INFINODE_PARENT_PID: String(process.pid),
   };
 
-  backend = spawn(process.execPath, [runner, entry], {
+  const child = spawn(process.execPath, [runner, entry], {
     cwd: app.isPackaged ? process.resourcesPath : appPath,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  backend.stdout?.on('data', (chunk) => console.log(`[infinode] ${chunk.toString().trimEnd()}`));
-  backend.stderr?.on('data', (chunk) => console.error(`[infinode] ${chunk.toString().trimEnd()}`));
-  backend.on('error', (error) => console.error('[infinode] backend error', error));
-  backendUrl = `http://127.0.0.1:${port}`;
-  await waitForServer(backendUrl, backend);
-  return backendUrl;
+  backend = child;
+  let errors = '';
+  child.stdout?.on('data', (chunk) => console.log(`[infinode] ${chunk.toString().trimEnd()}`));
+  child.stderr?.on('data', (chunk) => {
+    console.error(`[infinode] ${chunk.toString().trimEnd()}`);
+    errors = (errors + chunk.toString()).slice(-600);
+  });
+  child.on('error', (error) => console.error('[infinode] backend error', error));
+  child.on('exit', () => {
+    // A window opened after this starts a fresh backend.
+    if (backend === child) {
+      backend = undefined;
+      backendReady = undefined;
+    }
+  });
+  const url = `http://127.0.0.1:${port}`;
+  await waitForServer(url, child, () => errors.trim().split('\n').slice(-2).join(' '));
+  return url;
+}
+
+/**
+ * The running backend, started on first use. On macOS closing the last window keeps the app alive, and
+ * reopening it from the Dock used to start a second backend on the same data folder while the first kept
+ * running; the two overwrote each other's indexes.
+ */
+function ensureBackend() {
+  backendReady ??= startBackend().catch((error) => {
+    backendReady = undefined;
+    throw error;
+  });
+  return backendReady;
 }
 
 async function createWindow() {
-  const url = isDev ? devUrl : await startBackend();
+  const url = isDev ? devUrl : await ensureBackend();
   const win = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -159,6 +187,9 @@ if (!gotLock) {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
+  // Ctrl+C in the terminal, or `kill`: quit the normal way so the backend is stopped too.
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => app.quit());
+
   app.on('before-quit', () => {
     if (!quitting) {
       quitting = true;

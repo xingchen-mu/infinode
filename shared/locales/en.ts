@@ -638,6 +638,8 @@ export const EN: Record<string, Translation> = {
   画布已在别处被修改: 'The board was changed elsewhere',
   未命名画布: 'Untitled board',
   '只支持 http / https 地址': 'Only http and https addresses are supported',
+  '数据文件夹 {dir} 已经有一个 Infinode 服务在用（进程 {pid}，端口 {port}）。两个服务同时用一个文件夹会互相覆盖数据，先关掉那个再启动。':
+    'Another Infinode server is already using the data folder {dir} (process {pid}, port {port}). Two servers on one folder overwrite each other’s data; stop that one first.',
   '显存不足：试试降低分辨率或时长，或等其它任务结束后重试': 'Out of GPU memory: try a lower resolution or duration, or retry when other tasks finish',
   '这个模型需要 fp8 计算，当前服务器 GPU 在 triton 后端下不支持': "This model needs fp8, which the server's GPU cannot run on the triton backend",
   '输入图片在 ComfyUI 上找不到了，请重试（{detail}）': 'ComfyUI cannot find the input image; please retry ({detail})',
