@@ -167,13 +167,15 @@ DEEPSEEK_API_KEY=sk-...                   # 默认模型 deepseek/deepseek-flash
 
 跟助手说故事和镜头，比如「做一个两个镜头的小短剧：深夜便利店门口，一个女孩在等人……」。它会按这个顺序做，每一步都留在画布上，你随时可以改：
 
-1. 把**剧本**和**分镜表**写成画布上的文本节点，等你认可
-2. 出**角色设定图**（白底全身照、正脸特写）和**场景图**
-3. 每个镜头出一张**关键帧**，拼成一张图自己检查一遍，有问题的单独重做
+1. 先写一句话梗概和节拍表，再把**剧本**和**分镜表**写成画布上的文本节点。分镜表里每个镜头写清作用、景别和机位、起始画面、分步的动作、运镜、台词和声音；它按清单自查一遍（开头有没有钩子、视线接不接得上、有没有只写了情绪），再等你认可
+2. 出**角色设定图**（白底全身照、正脸特写）、**场景图**和重要道具图
+3. 每个镜头出一张**关键帧**（画动作开始前的那一刻），拼成一张图自己检查一遍，有问题的单独重做
 4. 每个镜头生成一段**视频**：提交前面板上会弹出确认卡，写明段数和预计占用 GPU 多久，你点「开始」才会提交
 5. 先听每段的台词在哪几秒，再按分镜**剪辑成片**，台词不会被剪掉
 
 每一批跑完它会自动接着做，页面关了也照样进行；你可以随时插话、停止，或者说「重新剪一版」。
+
+这套做法写在 [server/agent/guides.ts](server/agent/guides.ts) 的短剧手册里：助手开始做之前先用 `read_guide` 读它，每一步之前再重读那一节。出图的提示词另有一本 Qwen-Image 手册，按 Qwen-Image 2.1 官方提示词改写模型的规则整理。通过 MCP 接入的外部 agent 也能读到这两本手册。
 
 ## 用 Claude Code / Codex 操作画布（MCP）
 
@@ -203,7 +205,7 @@ tool_timeout_sec = 600   # 默认 60 秒；等出图、剪辑会更久
 
 - **它知道你在看什么**：打开着的页面会把当前画布、选中的节点和视野位置告诉后端。外部 agent 先调用 `get_context`，就知道「这张」「选中的」指哪些节点；不指定画布时，默认操作你正在看的那张。新生成的节点放在你的视野里，画布会自动移过去。
 - **哪些操作要你同意**：读画布、看图、等结果这类工具标注了只读，客户端可以直接放行；出图、出视频、剪辑会改动画布，按客户端的设置征求你同意。批量出视频很占 GPU，返回结果里会写明预计时长。
-- **工具一览**：`get_context`、`list_boards`、`create_board`、`read_board`、`view_images`、`review_items`、`generate_image`、`batch_generate_images`、`generate_video`、`batch_generate_videos`、`list_workflows`、`run_workflow`、`wait_for_items`、`cancel_items`、`write_note`、`inspect_clips`、`assemble_video`。
+- **工具一览**：`get_context`、`list_boards`、`create_board`、`read_board`、`read_guide`、`view_images`、`review_items`、`generate_image`、`batch_generate_images`、`generate_video`、`batch_generate_videos`、`list_workflows`、`run_workflow`、`wait_for_items`、`cancel_items`、`write_note`、`inspect_clips`、`assemble_video`。
 - **只对本机开放**：`/mcp` 只接受同一台电脑上的连接；把画布共享到局域网时，别人也连不上。只支持 stdio 的客户端可以用 [mcp-remote](https://www.npmjs.com/package/mcp-remote) 转接：`npx mcp-remote http://127.0.0.1:8787/mcp`。
 
 ## 官方模板

@@ -45,30 +45,12 @@ ${vision ? '- 出完图检查质量：一两张用 view_images，一批用 revie
 - 用户导入的 ComfyUI 工作流和官方模板：先用 list_workflows 查看，再用 run_workflow 运行。
 
 ## 写提示词
-- 写具体：主体、动作、场景、光线、镜头、风格。用户用中文描述时，Qwen-Image 可以直接用中文提示词。
-- 要保持人物一致，就把人物图作为参考图传进去，并在提示词里写清楚「图1中的人物」。
-- 视频提示词写动作、镜头运动、对白和声音，不要只重复画面里有什么。
+- 用 qwen 出图之前，先用 read_guide 读 qwen_image 手册（一段对话里读一次就够）。要点：没有参考图时用英文写一整段看图描述（约 15–20 句，写清每样东西的位置和光线）；带参考图时写成一条指令，说清每张图的用途。都不写画面比例（用 aspect 参数传），不写 8K、masterpiece 这类词，不想要的东西不要写进去。
+- 要保持人物一致，就把人物图作为参考图传进去，提示词里指向它（「图1中的人物」），不要再用文字描述他的长相。
+- 视频提示词写动作、镜头运动、对白和声音，不要只重复画面里有什么。动作写成看得见的身体动作，不写情绪形容词；首帧就是视频的第 0 秒，要做的动作在首帧之后才开始。用首帧生成单段视频时，也照 short_drama 手册里 video 一节的格式写（用 read_guide 读那一节）。
 
-## 做短剧（多个镜头剪成一条片子）
-按顺序做，每一步的结果都留在画布上，用户可以随时改：
-1. 用 write_note 写「剧本」和「分镜表」。分镜表用表格，每个镜头一行：编号（S01、S02…）、秒数（2–5）、景别和画面、动作和镜头运动、台词（谁说）。写完给用户看，等用户认可再往下做。
-2. 设定图（batch_generate_images）：每个角色先出白底正面全身照（group「全身照」），再拿全身照当参考出正脸特写（group「脸部特写」）；每个场景出一张没有人的场景图（group「场景」）。
-3. 关键帧：每个镜头一张 16:9 图，batch_generate_images，group「关键帧」，按镜头顺序提交，name 用镜头编号。参考图带上该镜头的人物特写、全身照和场景图。提示词要点：
-   - 同一个人的两张参考图要写明「图1是他的脸部特写，图2是他的全身照，是同一个人」，否则会画成两个人。
-   - 写「画面中只有N个人物，每个人只出现一次」。
-   - 背景写「背景是图3的场景」，近景特写也带上场景图，否则背景会漂。
-   - 不要第一人称视角的画面，转成视频会糊成鬼影。
-4. 关键帧出完用 review_items 检查一遍，有问题的单独重做，再继续。
-5. 视频：每个镜头单独生成一段（batch_generate_videos，首帧是该镜头的关键帧，name 用镜头编号），每段至少 5 秒，剪辑时再裁到分镜的秒数。视频提示词用这个格式（英文写，台词用中文）：
-   <一句画风和场景，如 Photorealistic live-action Chinese web short drama, ...>
-   No on-screen text, captions or subtitles anywhere in the picture.
-   For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced. One continuous shot with no cuts and no fades; the picture stays fully lit until the last frame.
-   integrated_multimodal_description:
-   [Shot 1] Starting from <Picture 1>, <动作和镜头运动>; <人物外貌> says: <d>[Chinese] 台词</d>
-   overall_soundscape: <环境声>
-   non_diegetic_music: N/A
-   没有台词的镜头不要提说什么语言，改写「Nobody speaks in this shot: no dialogue and no voices」，否则模型会自己编台词和字幕。画面里有手机屏幕时写清楚屏幕上显示什么。
-6. 视频全部完成后，先用 inspect_clips 看每段哪几秒有台词，再用 assemble_video 按镜头顺序拼成片。每段大致裁到分镜表里的秒数，但台词必须完整保留：台词在后半段就从后面取（比如 start=1.5），说完再留 0.3 秒左右。剪辑结果提示有声音被裁掉时，改了重剪。
+## 做短剧和多镜头的片子
+用户要做短剧、剧情短片、带故事的广告，或任何要把多个镜头剪成一条的片子时：先用 read_guide 读完 short_drama 手册，再照里面的步骤做。每进入一步（写分镜表、出关键帧、写视频提示词、剪辑）之前，那一步的规则记不清了就重读那一节，不要凭印象做。
 
 ## 回复
 - 简洁地说清楚做了什么、生成了什么、大概要等多久。用什么语言回复，按最后一节的语言要求。面板会把节点显示出来，不用在回复里列 id。

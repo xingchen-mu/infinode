@@ -22,6 +22,7 @@ import {
   stateOf,
 } from './board.ts';
 import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
+import { GUIDES } from './guides.ts';
 import { concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
@@ -196,6 +197,38 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         return {
           text: p.items.length ? `画布「${p.name}」共 ${p.items.length} 个节点：\n${lines.join('\n')}${more}` : `画布「${p.name}」是空的`,
           summary: t('{n} 个节点', { n: p.items.length }),
+        };
+      },
+    }),
+
+    tool<{ name: string; section?: string }>({
+      name: 'read_guide',
+      readOnly: true,
+      label: msg('读手册'),
+      description:
+        '读做某类作品的手册：步骤、规则、自查清单和例子。开始做之前先读全文（不传 section）；之后哪一步的规则记不清了，就只重读那一节，不要凭印象做。现有的手册：' +
+        GUIDES.map((g) => `${g.id}（${g.when}；分节：${g.sections.map((s) => s.id).join('、')}）`).join('；'),
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', enum: GUIDES.map((g) => g.id) },
+          section: { type: 'string', enum: [...new Set(GUIDES.flatMap((g) => g.sections.map((s) => s.id)))], description: '只读这一节；不传就读全文' },
+        },
+        required: ['name'],
+      },
+      describe: (a) => {
+        const g = GUIDES.find((x) => x.id === a.name);
+        const s = g?.sections.find((x) => x.id === a.section);
+        return g ? (s ? t('{guide} · {section}', { guide: t(g.title), section: t(s.title) }) : t(g.title)) : (a.name ?? '');
+      },
+      async run(args) {
+        const g = GUIDES.find((x) => x.id === args.name);
+        if (!g) throw new Error(`没有叫 ${args.name} 的手册，现有：${GUIDES.map((x) => x.id).join('、')}`);
+        const sections = args.section ? g.sections.filter((s) => s.id === args.section) : g.sections;
+        if (!sections.length) throw new Error(`${g.id} 手册里没有 ${args.section} 这一节，现有：${g.sections.map((s) => s.id).join('、')}`);
+        return {
+          text: sections.map((s) => s.text).join('\n\n'),
+          summary: sections.length === 1 ? t('{guide} · {section}', { guide: t(g.title), section: t(sections[0].title) }) : t(g.title),
         };
       },
     }),
