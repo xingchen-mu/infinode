@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Agent, type AgentEvent, type AgentMessage, type AgentTool, type ThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
@@ -29,6 +29,7 @@ import { type CanvasDeps, ResultWriter, describeItem, readBoard } from './board.
 import { speedNote } from './estimate.ts';
 import { SUMMARY_PROMPT, commercialRules, languageRule, systemPrompt } from './prompt.ts';
 import { type CanvasTool, type Json, type ToolContext, canvasTools } from './tools.ts';
+import { writeJson } from './write.ts';
 
 const DEFAULT_MODEL = 'deepseek/deepseek-flash';
 const THINKING = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
@@ -593,9 +594,9 @@ export class AgentHub {
     return true;
   }
 
-  private async saveWatches() {
-    await writeFile(`${this.watchFile}.tmp`, JSON.stringify(this.watches));
-    await rename(`${this.watchFile}.tmp`, this.watchFile);
+  /** Never rejects: callers fire and forget, and an unhandled rejection would stop the server. */
+  private saveWatches() {
+    return writeJson(this.watchFile, () => this.watches).catch((err) => console.error('agent: could not save the watches', err));
   }
 
   private onTask(t: Task) {
@@ -798,11 +799,14 @@ export class AgentHub {
     s.usage = { tokens: s.usage.tokens + (m.usage?.totalTokens ?? 0), cost: s.usage.cost + (m.usage?.cost?.total ?? 0) };
   }
 
-  private async save(s: Session) {
-    const messages = s.agent.state.messages.filter((m) => m.role !== 'system').map(withoutImages);
-    const file = this.file(s.projectId);
-    await writeFile(`${file}.tmp`, JSON.stringify({ version: 2, messages, usage: s.usage, archived: s.archived }));
-    await rename(`${file}.tmp`, file);
+  /** In line behind any save still running (a run's last save can overlap the next run's first). */
+  private save(s: Session) {
+    return writeJson(this.file(s.projectId), () => ({
+      version: 2,
+      messages: s.agent.state.messages.filter((m) => m.role !== 'system').map(withoutImages),
+      usage: s.usage,
+      archived: s.archived,
+    }));
   }
 
   /** A finished tool call as the panel shows it (also used while it still runs: `result` undefined). */
