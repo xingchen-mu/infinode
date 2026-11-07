@@ -83,6 +83,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
@@ -92,10 +93,10 @@ jobs:
             echo 'No desktop assets were produced.' >&2
             exit 1
           fi
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          if gh release view "$RELEASE_TAG" --repo "$RELEASE_REPO" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$RELEASE_REPO" --clobber
           else
-            gh release create "$RELEASE_TAG" "${assets[@]}" \
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$RELEASE_REPO" \
               --title "Infinode ${RELEASE_TAG#v}" \
               --generate-notes
           fi
