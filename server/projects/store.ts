@@ -6,6 +6,8 @@ import { config } from '../config.ts';
 import { t } from '../i18n.ts';
 
 const ID = /^[\w-]{6,32}$/;
+/** Snapshots the assistant took on its own before a change, kept per board; older ones are dropped. */
+const MAX_AUTO_SNAPSHOTS = 10;
 
 /** The board changed since the version the writer started from. */
 export class ProjectConflict extends Error {
@@ -23,6 +25,8 @@ export interface ItemsPatch {
 interface ProjectSnapshot extends ProjectSnapshotSummary {
   items: CanvasItem[];
   viewport: Project['viewport'];
+  /** Taken by the assistant before deleting or rearranging; only the latest few are kept. */
+  auto?: boolean;
 }
 
 export class ProjectStore {
@@ -125,7 +129,7 @@ export class ProjectStore {
     }
   }
 
-  async createSnapshot(projectId: string, name = t('未命名快照')): Promise<ProjectSnapshotSummary | undefined> {
+  async createSnapshot(projectId: string, name = t('未命名快照'), opts: { auto?: boolean } = {}): Promise<ProjectSnapshotSummary | undefined> {
     return this.exclusive(projectId, async () => {
       const project = await this.get(projectId);
       if (!project) return undefined;
@@ -137,9 +141,11 @@ export class ProjectStore {
         itemCount: project.items.length,
         items: project.items,
         viewport: project.viewport,
+        ...(opts.auto ? { auto: true } : {}),
       };
       await mkdir(this.snapshotProjectDir(projectId), { recursive: true });
       await writeFile(this.snapshotFile(projectId, snapshot.id), JSON.stringify(snapshot));
+      if (opts.auto) await this.dropOldAutoSnapshots(projectId);
       return { id: snapshot.id, projectId, name: snapshot.name, createdAt: snapshot.createdAt, itemCount: snapshot.itemCount };
     });
   }
@@ -228,6 +234,22 @@ export class ProjectStore {
   private snapshotFile(projectId: string, snapshotId: string) {
     if (!ID.test(snapshotId)) throw new Error('invalid snapshot id');
     return join(this.snapshotProjectDir(projectId), `${snapshotId}.json`);
+  }
+
+  /** Keeps the latest automatic snapshots of a board; ones the user (or the assistant, when asked) saved stay. */
+  private async dropOldAutoSnapshots(projectId: string) {
+    const dir = this.snapshotProjectDir(projectId);
+    const auto: { file: string; createdAt: number }[] = [];
+    for (const name of (await readdir(dir)).filter((n) => n.endsWith('.json'))) {
+      try {
+        const snapshot = JSON.parse(await readFile(join(dir, name), 'utf8')) as ProjectSnapshot;
+        if (snapshot.auto) auto.push({ file: join(dir, name), createdAt: snapshot.createdAt });
+      } catch {
+        /* unreadable: left alone */
+      }
+    }
+    auto.sort((a, b) => b.createdAt - a.createdAt);
+    for (const old of auto.slice(MAX_AUTO_SNAPSHOTS)) await rm(old.file, { force: true });
   }
 
   private async readSnapshot(projectId: string, snapshotId: string): Promise<ProjectSnapshot | undefined> {

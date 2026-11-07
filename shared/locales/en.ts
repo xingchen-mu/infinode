@@ -618,8 +618,10 @@ export const EN: Record<string, Translation> = {
   '删除 {n} 张图': ['Delete {n} image', 'Delete {n} images'],
   '删除 {n} 段视频': ['Delete {n} video', 'Delete {n} videos'],
   '删除 {images} 张图和 {videos} 段视频': 'Delete {images} images and {videos} videos',
-  '删掉后画布上撤销不了。文件还留在资产库里，可以从那里重新加回画布，但名字、连线和生成参数不会保留。':
-    'This cannot be undone on the board. The files stay in the asset library and can be added back from there, without their names, links or generation settings.',
+  '删之前会自动存一个快照：删错了，在顶栏菜单的「项目快照」里恢复（画布上的撤销撤不回）。':
+    'A snapshot is saved first: if this was a mistake, restore it from Project snapshots in the top bar menu (undo on the board cannot bring these back).',
+  '助手删除 {n} 个节点之前': ['Before the assistant deleted {n} item', 'Before the assistant deleted {n} items'],
+  '助手排列 {n} 个节点之前': ['Before the assistant arranged {n} item', 'Before the assistant arranged {n} items'],
   移动节点: 'Move',
   'positions 里的 x、y 要是数字': 'x and y in positions must be numbers',
   '要传 ids（配 beside 或 dx / dy），或者传 positions': 'Pass ids (with beside or dx / dy), or positions',
@@ -628,6 +630,15 @@ export const EN: Record<string, Translation> = {
   '移动了 {n} 个': '{n} moved',
   排列节点: 'Arrange',
   '排好了 {n} 个': '{n} arranged',
+  改名称和类型: 'Rename',
+  '改了 {n} 个': '{n} changed',
+  存快照: 'Save snapshot',
+  截取视频帧: 'Capture frame',
+  最后一帧: 'Last frame',
+  '第 {s} 秒': 'At {s} s',
+  '{name} 尾帧': '{name} last frame',
+  '{name} 第 {s} 秒': '{name} at {s} s',
+  没有从视频里截到画面: 'No frame came out of the video',
 
   // ---------------------------------------------------------------- server
   '不支持的文件类型: {name}': 'Unsupported file type: {name}',

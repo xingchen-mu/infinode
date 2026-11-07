@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import sharp from 'sharp';
 import { t } from '../i18n.ts';
 
@@ -73,6 +76,21 @@ export function spansBetweenSilences(log: string, duration: number): { start: nu
 /** One frame of a video as PNG. */
 export async function videoFrame(path: string, at: number): Promise<Buffer> {
   return exec('ffmpeg', ['-v', 'error', '-ss', String(Math.max(0, at)), '-i', path, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-']);
+}
+
+/**
+ * The very last frame, as PNG. Seeking close to the end can land past it and give nothing (ffmpeg still
+ * succeeds), so the last second is decoded with each frame written over the one before.
+ */
+export async function lastFrame(path: string, signal?: AbortSignal): Promise<Buffer> {
+  const dir = await mkdtemp(join(tmpdir(), 'infinode-frame-'));
+  try {
+    const out = join(dir, 'last.png');
+    await exec('ffmpeg', ['-v', 'error', '-sseof', '-1', '-i', path, '-update', '1', '-y', out], signal);
+    return await readFile(out);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 export interface Tile {

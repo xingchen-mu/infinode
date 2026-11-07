@@ -242,6 +242,19 @@ test('deleting finished images waits for its own card, also when every write nee
   assert.match(context, /用户已确认。已从画布删掉 1 个节点/);
 });
 
+test('a board keeps the latest ten snapshots the assistant took on its own; the ones the user saved stay', async () => {
+  const board = await projects.create('snapshots');
+  await projects.createSnapshot(board.id, '用户存的');
+  for (let i = 0; i < 12; i++) {
+    await sleep(2);
+    await projects.createSnapshot(board.id, `自动 ${i}`, { auto: true });
+  }
+  const names = (await projects.listSnapshots(board.id)).map((s) => s.name);
+  assert.equal(names.length, 11);
+  assert.ok(names.includes('用户存的'));
+  assert.deepEqual(names.slice(0, 10), Array.from({ length: 10 }, (_, i) => `自动 ${11 - i}`));
+});
+
 test('commercial-only mode makes image generation default to Z-Image', async () => {
   const board = await projects.create('commercial');
   const tasks = fakeTasks();

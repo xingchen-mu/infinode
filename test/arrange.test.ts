@@ -22,10 +22,15 @@ const pending = (id: string, x: number, y: number): CanvasItem => ({ id, kind: '
 /** An in-memory board behind the canvas tools. */
 function board(items: CanvasItem[], host: 'panel' | 'mcp' = 'panel') {
   const project: Project = { id: 'board00001', name: 't', items, viewport: { x: 0, y: 0, zoom: 1 }, createdAt: 0, updatedAt: 0 };
+  const snapshots: { name: string; auto: boolean; ids: string[] }[] = [];
   const deps = {
     tasks: { list: () => [] as Task[] },
     projects: {
       get: async () => project,
+      createSnapshot: async (_id: string, name: string, opts: { auto?: boolean } = {}) => {
+        snapshots.push({ name, auto: Boolean(opts.auto), ids: project.items.map((i) => i.id) });
+        return { id: `snap${snapshots.length}`, projectId: project.id, name, createdAt: Date.now(), itemCount: project.items.length };
+      },
       patchItems: async (_id: string, patch: { upsert?: CanvasItem[]; remove?: string[] }) => {
         const drop = new Set(patch.remove ?? []);
         const next = new Map(project.items.filter((i) => !drop.has(i.id)).map((i) => [i.id, i]));
@@ -42,7 +47,7 @@ function board(items: CanvasItem[], host: 'panel' | 'mcp' = 'panel') {
     const i = project.items.find((it) => it.id === id)!;
     return { x: i.x, y: i.y };
   };
-  return { project, tool, at };
+  return { project, tool, at, snapshots };
 }
 const ctx = { projectId: 'board00001' };
 
@@ -106,11 +111,12 @@ test('move_items puts nodes beside another one, shifts them, and puts them back 
 });
 
 test('arrange_items lines nodes up in the order given, and steps right of nodes in the way', async () => {
-  const { tool, at } = board([img('s3', 0, 0), img('s1', 700, 50), img('s2', 0, 500)]);
+  const { tool, at, snapshots } = board([img('s3', 0, 0), img('s1', 700, 50), img('s2', 0, 500)]);
   const arrangeItems = tool('arrange_items');
   const out = await arrangeItems.run({ ids: ['s1', 's2', 's3'], layout: 'row' }, ctx);
   assert.deepEqual([at('s1'), at('s2'), at('s3')], [{ x: 0, y: 0 }, { x: 544, y: 0 }, { x: 1088, y: 0 }]);
-  assert.match(out.text, /排成一行.*原位置.*`s1` \(700,50\)/);
+  assert.match(out.text, /排成一行.*快照「助手排列 3 个节点之前」.*原位置.*`s1` \(700,50\)/);
+  assert.deepEqual(snapshots, [{ name: '助手排列 3 个节点之前', auto: true, ids: ['s3', 's1', 's2'] }]);
 
   const crowded = board([img('s1', 0, 0), img('s2', 0, 400), { ...note('o', 1000, 100), w: 200, h: 200 }]);
   await crowded.tool('arrange_items').run({ ids: ['s1', 's2'], layout: 'row', gap: 100 }, ctx);
@@ -118,7 +124,7 @@ test('arrange_items lines nodes up in the order given, and steps right of nodes 
 });
 
 test('delete_items takes only finished images and videos: through a card in the panel, directly for outside agents', async () => {
-  const { project, tool } = board([img('a', 0, 0), note('n', 600, 0), pending('p', 0, 400)]);
+  const { project, tool, snapshots } = board([img('a', 0, 0), note('n', 600, 0), pending('p', 0, 400)]);
   const del = tool('delete_items');
   assert.equal(del.destructive, true);
   const out = await del.run({ ids: ['a', 'n', 'p'] }, ctx);
@@ -126,13 +132,49 @@ test('delete_items takes only finished images and videos: through a card in the 
   assert.deepEqual(out.approval && [out.approval.title, out.approval.frames, out.approval.confirm], ['删除 1 张图', ['a'], '删除']);
   assert.match(out.text, /没删：`n`（文本节点），`p`（还没有结果，用 cancel_items）/);
 
+  assert.equal(snapshots.length, 0, 'no snapshot for a card the user may decline');
+
   const done = await del.approve!(out.approval!.payload, ctx);
   assert.deepEqual(project.items.map((i) => i.id), ['n', 'p']);
   assert.equal(done.summary, '删掉了 1 个');
+  assert.deepEqual(snapshots, [{ name: '助手删除 1 个节点之前', auto: true, ids: ['a', 'n', 'p'] }], 'the board as it was, deleted item included');
+  assert.match(done.text, /项目快照/);
   await assert.rejects(del.run({ ids: ['n', 'p'] }, ctx), /cancel_items/);
 
   const outside = board([img('a', 0, 0), img('b', 600, 0)], 'mcp');
   const direct = await outside.tool('delete_items').run({ ids: ['a'] }, ctx);
   assert.equal(direct.approval, undefined);
   assert.deepEqual(outside.project.items.map((i) => i.id), ['b']);
+});
+
+test('update_items renames and retypes only what it is given, and an empty string clears it', async () => {
+  const { project, tool } = board([img('a', 0, 0, '角色'), { ...img('b', 600, 0), name: 'S04 重做' }, note('n', 0, 400)]);
+  const out = await tool('update_items').run(
+    {
+      changes: [
+        { id: 'a', name: '林夏' },
+        { id: 'b', name: 'S04', group: '关键帧' },
+        { id: 'b', group: '' },
+        { id: 'n', name: '剧本' },
+      ],
+    },
+    ctx,
+  );
+  const by = (id: string) => project.items.find((i) => i.id === id)!;
+  assert.deepEqual([by('a').name, by('a').group], ['林夏', '角色']);
+  assert.deepEqual([by('b').name, by('b').group], ['S04', undefined], 'later changes to one item build on earlier ones');
+  assert.equal(by('n').name, '剧本');
+  assert.match(out.text, /`b` 名称「S04 重做」→「S04」/);
+  assert.equal(out.summary, '改了 3 个');
+  assert.deepEqual([by('a').x, by('b').x], [0, 600], 'nothing moves');
+
+  const same = await tool('update_items').run({ changes: [{ id: 'a', name: '林夏' }] }, ctx);
+  assert.equal(same.summary, '改了 0 个');
+});
+
+test('save_snapshot keeps the board under the name given, as a snapshot the user saved', async () => {
+  const { tool, snapshots } = board([img('a', 0, 0)]);
+  const out = await tool('save_snapshot').run({ name: '第一版关键帧' }, ctx);
+  assert.deepEqual(snapshots, [{ name: '第一版关键帧', auto: false, ids: ['a'] }]);
+  assert.match(out.text, /项目快照/);
 });

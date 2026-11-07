@@ -15,7 +15,7 @@ export interface Presence {
 }
 
 /** Tools whose results are new board items, which the page then brings into view. */
-const CREATES = new Set(['generate_image', 'generate_video', 'batch_generate_images', 'batch_generate_videos', 'run_workflow', 'write_note', 'assemble_video']);
+const CREATES = new Set(['generate_image', 'generate_video', 'batch_generate_images', 'batch_generate_videos', 'run_workflow', 'write_note', 'assemble_video', 'capture_frame']);
 /** Codex gives a tool call 60 s by default: wait a bit less unless asked for longer. */
 const WAIT_DEFAULT = 50;
 /** A page that reported this recently still counts as what the user is looking at. */

@@ -11,6 +11,7 @@ import { publicAsset } from '../assets/store.ts';
 import {
   type BatchJob,
   type CanvasDeps,
+  LONG_SIDE,
   type ResultWriter,
   describeItem,
   findItems,
@@ -18,6 +19,7 @@ import {
   launch,
   launchBatch,
   patchBoard,
+  placeGroups,
   readBoard,
   stateOf,
 } from './board.ts';
@@ -25,7 +27,7 @@ import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
 import { GUIDES } from './guides.ts';
 import { redoneVersion } from '../../shared/frames.ts';
 import { type Arrangement, type Side, arrange, besideOf, clearOf } from './layout.ts';
-import { type Tile, concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
+import { type Tile, concatClips, contactSheet, lastFrame, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
 export interface ToolContext {
@@ -208,18 +210,28 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     };
   };
 
+  /**
+   * The board cannot undo what the assistant does, so a snapshot comes first; the user restores it from
+   * 项目快照. Only the latest few of these are kept.
+   */
+  const snapshotFirst = async (projectId: string, name: string): Promise<string> => {
+    const snap = await deps.projects.createSnapshot(projectId, name, { auto: true });
+    return snap ? `动手前存了快照「${snap.name}」，用户可以在顶栏菜单的「项目快照」里恢复。` : '';
+  };
+
   /** Takes finished items off the board; their files stay in the asset library. */
   const deleteItems = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
     const { ids: doomed } = payload as { ids: string[] };
     const p = await readBoard(deps, ctx.projectId);
     const present = doomed.filter((id) => p.items.some((i) => i.id === id));
+    const saved = present.length ? await snapshotFirst(ctx.projectId, t('助手删除 {n} 个节点之前', { n: present.length })) : '';
     if (present.length) await patchBoard(deps, ctx.projectId, { remove: present });
     const gone = doomed.length - present.length;
     return {
       text:
         `已从画布删掉 ${present.length} 个节点：${present.map((id) => `\`${id}\``).join(' ')}` +
         (gone ? `（另有 ${gone} 个在确认前已经不在画布上了）` : '') +
-        '。文件还在资产库里，用户可以从那里加回画布。',
+        `。${saved}`,
       summary: t('删掉了 {n} 个', { n: present.length }),
     };
   };
@@ -961,7 +973,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       description:
         '把已经生成好的图片和视频从画布上删掉（用户说「删掉这几张」「不要的都删了」时）。' +
         (host === 'panel' ? '会先在面板上弹确认卡，用户点了才删；调用后告诉用户在等他确认，然后结束这一轮。' : '会直接删除，先问过用户再调用。') +
-        '文件还留在资产库里，用户可以从那里加回画布，但节点的名字、类型、连线和生成参数不会保留，画布上也撤销不了。还在排队或生成中的用 cancel_items；文本节点不能用它删。',
+        '删之前会自动存一个快照，删错了用户可以在顶栏菜单的「项目快照」里恢复（画布上的撤销撤不回助手的改动）。还在排队或生成中的用 cancel_items；文本节点不能用它删。',
       parameters: {
         type: 'object',
         properties: { ids: { ...ids('要删的节点 id'), minItems: 1 } },
@@ -993,7 +1005,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
               : !images
                 ? t('删除 {n} 段视频', { n: videos })
                 : t('删除 {images} 张图和 {videos} 段视频', { images, videos }),
-            detail: t('删掉后画布上撤销不了。文件还留在资产库里，可以从那里重新加回画布，但名字、连线和生成参数不会保留。'),
+            detail: t('删之前会自动存一个快照：删错了，在顶栏菜单的「项目快照」里恢复（画布上的撤销撤不回）。'),
             payload,
             frames: payload.ids,
             confirm: t('删除'),
@@ -1011,7 +1023,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         '① ids + beside（另一个节点的 id）+ side（right / left / below / above，默认 right）：把这些节点整体放到那个节点旁边，彼此的相对位置不变，挡路的节点会自动让开；' +
         '② ids + dx / dy：整体平移；' +
         '③ positions：把每个节点放到给定坐标，比如放回原位。' +
-        '画布上撤销不了助手的移动，返回里记着原位置，用户要放回去时用 positions。',
+        '画布上的撤销撤不回助手的移动：返回里记着原位置，用户要放回去时用 positions；一次挪动一大片之前，先用 save_snapshot 存个快照。',
       parameters: {
         type: 'object',
         properties: {
@@ -1081,7 +1093,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       description:
         '把这些节点重新排整齐，顺序就是 ids 的顺序（比如按镜头号排）。layout：row 排成一行（顶端对齐）；column 排成一列（左边对齐）；' +
         'grid 排成网格（columns 列，不传就接近正方形）；groups 按类型（group）分列，同一类型从上到下一列，各列按类型第一次出现的顺序从左到右，没有类型的节点单独一列。' +
-        '排好的整块放在这些节点原来所在区域的左上角，挡到别的节点时往右让开。画布上撤销不了，返回里记着原位置，用户要放回去时用 move_items 的 positions。',
+        '排好的整块放在这些节点原来所在区域的左上角，挡到别的节点时往右让开。排之前会自动存快照；返回里也记着原位置，用户只想把它们放回去时用 move_items 的 positions。',
       parameters: {
         type: 'object',
         properties: {
@@ -1102,13 +1114,151 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         const b = boundsOf(items)!;
         const ours = new Set(items.map((i) => i.id));
         const spot = clearOf(p.items.filter((i) => !ours.has(i.id)), { x: b.x, y: b.y, w, h }, 'right');
+        const saved = await snapshotFirst(ctx.projectId, t('助手排列 {n} 个节点之前', { n: items.length }));
         await patchBoard(deps, ctx.projectId, {
           upsert: items.map((i, n) => ({ ...i, x: Math.round(spot.x + positions[n].x), y: Math.round(spot.y + positions[n].y) })),
         });
         return {
-          text: `已把 ${items.length} 个节点排成${ARRANGED[layout]}，整体在 (${Math.round(spot.x)},${Math.round(spot.y)})，占 ${Math.round(w)}×${Math.round(h)}。${formerly(items)}`,
+          text: `已把 ${items.length} 个节点排成${ARRANGED[layout]}，整体在 (${Math.round(spot.x)},${Math.round(spot.y)})，占 ${Math.round(w)}×${Math.round(h)}。${saved}${formerly(items)}`,
           summary: t('排好了 {n} 个', { n: items.length }),
           items: items.map((i) => i.id),
+        };
+      },
+    }),
+
+    tool<{ changes: { id: string; name?: string; group?: string }[] }>({
+      name: 'update_items',
+      label: msg('改名称和类型'),
+      description:
+        '修改节点的名称（name）和类型（group），只改传了的字段，传空字符串就清掉。文本节点的 name 就是标题。' +
+        '重做的关键帧要和原来的 name、group 一样，视频确认卡才认得出来；批量出图按 group 分列。改了 group 不会自动挪位置，要排进那一列用 arrange_items。',
+      parameters: {
+        type: 'object',
+        properties: {
+          changes: {
+            type: 'array',
+            minItems: 1,
+            maxItems: MAX_LISTED,
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, name: { type: 'string' }, group: { type: 'string', description: '图片类型，比如「关键帧」「角色」' } },
+              required: ['id'],
+            },
+          },
+        },
+        required: ['changes'],
+      },
+      describe: (a) => t('{n} 个节点', { n: a.changes?.length ?? 0 }),
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const next = new Map(findItems(p, args.changes.map((c) => c.id)).map((i) => [i.id, i]));
+        for (const c of args.changes) {
+          const item = next.get(c.id)!;
+          next.set(c.id, {
+            ...item,
+            name: c.name === undefined ? item.name : c.name.trim().slice(0, 60) || undefined,
+            group: c.group === undefined ? item.group : c.group.trim().slice(0, 30) || undefined,
+          });
+        }
+        const lines: string[] = [];
+        for (const [id, item] of next) {
+          const before = p.items.find((i) => i.id === id)!;
+          const diff = [
+            before.name !== item.name ? `名称「${before.name ?? ''}」→「${item.name ?? ''}」` : '',
+            before.group !== item.group ? `类型「${before.group ?? ''}」→「${item.group ?? ''}」` : '',
+          ].filter(Boolean);
+          if (diff.length) lines.push(`\`${id}\` ${diff.join('，')}`);
+        }
+        const changed = [...next.values()].filter((i) => lines.some((l) => l.startsWith(`\`${i.id}\``)));
+        if (changed.length) await patchBoard(deps, ctx.projectId, { upsert: changed });
+        return {
+          text: lines.length ? `已修改：\n${lines.join('\n')}` : '都和原来一样，没有改动',
+          summary: t('改了 {n} 个', { n: changed.length }),
+          items: [...next.keys()],
+        };
+      },
+    }),
+
+    tool<{ name: string }>({
+      name: 'save_snapshot',
+      label: msg('存快照'),
+      description:
+        '把画布现在的样子存成快照，用户可以在顶栏菜单的「项目快照」里恢复，或从它分出一块新画布。用户要求时存；' +
+        '自己要大改画布之前（比如批量重做一整组图、一次挪动一大片节点）也先存一个。delete_items 和 arrange_items 动手前会自动存，不用再存。',
+      parameters: {
+        type: 'object',
+        properties: { name: { type: 'string', description: '快照名称，说清楚是哪个版本，比如「第一版关键帧」' } },
+        required: ['name'],
+      },
+      describe: (a) => a.name ?? '',
+      async run(args, ctx) {
+        const snap = await deps.projects.createSnapshot(ctx.projectId, args.name);
+        if (!snap) throw new Error(t('画布不存在（可能已被删除）'));
+        return {
+          text: `已存快照「${snap.name}」（${snap.itemCount} 个节点），用户可以在顶栏菜单的「项目快照」里恢复。`,
+          summary: t('「{title}」', { title: snap.name }),
+        };
+      },
+    }),
+
+    tool<{ id: string; seconds?: number; name?: string; group?: string }>({
+      name: 'capture_frame',
+      label: msg('截取视频帧'),
+      description:
+        '从视频节点截一帧存成图片，放到画布上并连回这段视频。不传 seconds 就截最后一帧：拿它当下一段视频的首帧，接缝处人物的姿势和位置完全对得上（做法见 short_drama 手册 video 一节）。' +
+        '传 seconds 就截那一秒的画面。要当下一个镜头的首帧时，name 写那个镜头的编号，group 写「关键帧」，它会排进关键帧那一列。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '视频节点 id' },
+          seconds: { type: 'number', minimum: 0, description: '截第几秒的画面；不传就截最后一帧' },
+          name: { type: 'string' },
+          group: { type: 'string', description: '图片类型，比如「关键帧」' },
+        },
+        required: ['id'],
+      },
+      describe: (a) => (typeof a.seconds === 'number' ? t('第 {s} 秒', { s: a.seconds }) : t('最后一帧')),
+      async run(args, ctx) {
+        const p = await readBoard(deps, ctx.projectId);
+        const [video] = findItems(p, [args.id]);
+        const [media] = inputMedia(deps, [video], 'video');
+        const stored = deps.assets.get(media.id);
+        if (!stored) throw new Error(t('节点 {id} 的视频文件不见了', { id: video.id }));
+        const path = deps.assets.path(stored);
+        const info = await probe(path);
+        // A time in the last moments may fall past the last frame: that is the last frame too.
+        const at = typeof args.seconds === 'number' && Number.isFinite(args.seconds) && args.seconds < info.duration - 0.2 ? Math.max(0, args.seconds) : undefined;
+        const png = at === undefined ? await lastFrame(path, ctx.signal) : await videoFrame(path, at);
+        if (!png.length) throw new Error(t('没有从视频里截到画面'));
+        const name =
+          args.name?.trim().slice(0, 60) ||
+          (at === undefined
+            ? video.name ? t('{name} 尾帧', { name: video.name }) : t('尾帧')
+            : video.name ? t('{name} 第 {s} 秒', { name: video.name, s: at }) : t('第 {s} 秒', { s: at }));
+        const asset = await deps.assets.save(png, { filename: 'frame.png', mime: 'image/png', size: { width: info.width, height: info.height }, name });
+        const fresh = await readBoard(deps, ctx.projectId);
+        const size = displaySize(info.width, info.height, LONG_SIDE.image);
+        const group = args.group?.trim().slice(0, 30) || undefined;
+        const [pos] = group
+          ? placeGroups(fresh.items, [{ group, inputs: [video] }], [size], () => besideOf(video, size, 'right'))
+          : [clearOf(fresh.items, besideOf(video, size, 'right'), 'right')];
+        const item: CanvasItem = {
+          id: nanoid(10),
+          kind: 'image',
+          x: Math.round(pos.x),
+          y: Math.round(pos.y),
+          ...size,
+          asset: publicAsset(asset),
+          inputs: [video.id],
+          name,
+          group,
+          createdAt: Date.now(),
+        };
+        await patchBoard(deps, ctx.projectId, { upsert: [item] });
+        return {
+          text: `已截取 \`${video.id}\` 的${at === undefined ? '最后一帧' : `第 ${at} 秒`}，存成图片 \`${item.id}\`「${name}」（${info.width}×${info.height}）`,
+          summary: name,
+          items: [item.id],
         };
       },
     }),

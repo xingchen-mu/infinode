@@ -24,7 +24,7 @@ export interface CanvasDeps {
 }
 
 /** Same long sides the page uses, so agent results look like the user's own. */
-const LONG_SIDE: Record<MediaKind, number> = { image: 512, video: 640 };
+export const LONG_SIDE: Record<MediaKind, number> = { image: 512, video: 640 };
 
 export async function readBoard(deps: CanvasDeps, projectId: string): Promise<Project> {
   const p = await deps.projects.get(projectId);

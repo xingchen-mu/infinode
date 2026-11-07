@@ -205,7 +205,7 @@ tool_timeout_sec = 600   # 默认 60 秒；等出图、剪辑会更久
 
 - **它知道你在看什么**：打开着的页面会把当前画布、选中的节点和视野位置告诉后端。外部 agent 先调用 `get_context`，就知道「这张」「选中的」指哪些节点；不指定画布时，默认操作你正在看的那张。新生成的节点放在你的视野里，画布会自动移过去。
 - **哪些操作要你同意**：读画布、看图、等结果这类工具标注了只读，客户端可以直接放行；出图、出视频、剪辑会改动画布，按客户端的设置征求你同意。批量出视频很占 GPU，返回结果里会写明预计时长。
-- **工具一览**：`get_context`、`list_boards`、`create_board`、`read_board`、`read_guide`、`view_images`、`review_items`、`generate_image`、`batch_generate_images`、`generate_video`、`batch_generate_videos`、`list_workflows`、`run_workflow`、`wait_for_items`、`cancel_items`、`delete_items`、`move_items`、`arrange_items`、`write_note`、`inspect_clips`、`assemble_video`。
+- **工具一览**：`get_context`、`list_boards`、`create_board`、`read_board`、`read_guide`、`view_images`、`review_items`、`generate_image`、`batch_generate_images`、`generate_video`、`batch_generate_videos`、`list_workflows`、`run_workflow`、`wait_for_items`、`cancel_items`、`delete_items`、`move_items`、`arrange_items`、`update_items`、`save_snapshot`、`capture_frame`、`write_note`、`inspect_clips`、`assemble_video`。
 - **只对本机开放**：`/mcp` 只接受同一台电脑上的连接；把画布共享到局域网时，别人也连不上。只支持 stdio 的客户端可以用 [mcp-remote](https://www.npmjs.com/package/mcp-remote) 转接：`npx mcp-remote http://127.0.0.1:8787/mcp`。
 
 ## 官方模板
