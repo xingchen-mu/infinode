@@ -10,7 +10,7 @@ process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'infinode-agent-test-'));
 const { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } = await import('@earendil-works/pi-ai');
 const { AssetStore } = await import('../server/assets/store.ts');
 const { ProjectStore } = await import('../server/projects/store.ts');
-const { AgentHub } = await import('../server/agent/runtime.ts');
+const { AgentHub, compactThreshold } = await import('../server/agent/runtime.ts');
 type Task = import('../shared/types.ts').Task;
 type TaskRequest = import('../shared/types.ts').TaskRequest;
 type AssistantMessage = ReturnType<typeof fauxAssistantMessage>;
@@ -190,6 +190,56 @@ test('a long conversation is condensed into a summary, and the panel keeps the e
   const saved = JSON.parse(readFileSync(join(process.env.DATA_DIR!, 'agent', `${board.id}.json`), 'utf8'));
   assert.match(saved.messages[0].content, /^<canvas_summary>/);
   assert.ok(saved.messages.length < 14, `transcript shrank to ${saved.messages.length}`);
+});
+
+test('condensing keeps what the user typed word for word, also through a second summary', async () => {
+  const board = await projects.create('words');
+  let second = '';
+  const long = (i: number) => say(`回答 ${i}`, 5000);
+  const { hub } = await hubWith(
+    fakeTasks(),
+    [
+      ...[1, 2, 3, 4, 5, 6].map(long),
+      say('- 第一次整理', 300),
+      long(7),
+      long(8),
+      (context) => {
+        second = JSON.stringify(context.messages);
+        return say('- 第二次整理', 300);
+      },
+      say('回答 9'),
+    ],
+    { compactAt: 1000 },
+  );
+  for (let i = 1; i <= 9; i++) {
+    await hub.send(board.id, { text: `第 ${i} 句：主角叫林晚` });
+    await settled(hub, board.id);
+  }
+  const saved = JSON.parse(readFileSync(join(process.env.DATA_DIR!, 'agent', `${board.id}.json`), 'utf8'));
+  const summary: string = saved.messages[0].content;
+  assert.match(summary, /^<canvas_summary>\n- 第二次整理/);
+  for (const i of [1, 2, 3, 4]) assert.ok(summary.includes(`<said>第 ${i} 句：主角叫林晚</said>`), summary);
+  assert.ok(!summary.includes('canvas_context'), 'without the board context of the time');
+  assert.ok(second.includes('【之前的整理】- 第一次整理'), 'the first summary is condensed again');
+  assert.ok(!second.includes('<said>'), 'without the words carried in it');
+  const texts = (await hub.view(board.id)).entries.map((e) => (e.kind === 'tool' ? e.label : e.text));
+  assert.equal(texts.at(-1), '回答 9');
+});
+
+test('an OpenAI-compatible endpoint takes its context length and reasoning from the settings', () => {
+  assert.equal(compactThreshold(32_000), 19_200, 'condensed well inside a small window');
+  assert.equal(compactThreshold(1_000_000), 100_000);
+  assert.equal(compactThreshold(undefined), 100_000);
+  const deps = { projects, tasks: fakeTasks(), assets, workflows: () => [], capabilities: async () => ({}), changed: () => {} } as unknown as ConstructorParameters<typeof AgentHub>[0];
+  const settings = (reasoning: boolean, contextWindow?: number) =>
+    ({
+      agentConfig: () => ({ model: 'local-chat', baseUrl: 'http://127.0.0.1:9/v1', vision: false, thinking: 'medium', approvalMode: 'risky', contextWindow, reasoning }),
+    }) as unknown as ConstructorParameters<typeof AgentHub>[3];
+  type Inside = { model: { contextWindow: number; maxTokens: number; reasoning: boolean }; thinking: string; compactAt: number };
+  const small = new AgentHub(deps, () => {}, {}, settings(true, 32_000)) as unknown as Inside;
+  assert.deepEqual([small.model.contextWindow, small.model.reasoning, small.thinking, small.compactAt], [32_000, true, 'medium', 19_200]);
+  const plain = new AgentHub(deps, () => {}, {}, settings(false)) as unknown as Inside;
+  assert.deepEqual([plain.model.contextWindow, plain.model.reasoning, plain.thinking, plain.compactAt], [128_000, false, 'off', 76_800]);
 });
 
 test('after switching to English, panel rows are in English and the model is told to answer in English', async () => {

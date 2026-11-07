@@ -13,6 +13,19 @@ export interface AgentConfig {
   vision: boolean;
   thinking: string;
   approvalMode: 'risky' | 'always';
+  /** For a custom endpoint: context length in tokens (unset: 128k) and whether the model reasons. */
+  contextWindow?: number;
+  reasoning: boolean;
+}
+
+/** Context lengths a custom endpoint may declare: the instructions and tools alone take about 8k tokens. */
+export const CONTEXT_WINDOW = { min: 16_000, max: 10_000_000 } as const;
+export const isContextWindow = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= CONTEXT_WINDOW.min && (v as number) <= CONTEXT_WINDOW.max;
+
+/** AGENT_CONTEXT_WINDOW, when it is a usable length. */
+function envContextWindow(): number | undefined {
+  const n = Number(process.env.AGENT_CONTEXT_WINDOW?.trim() || NaN);
+  return isContextWindow(n) ? n : undefined;
 }
 
 export interface ModelDownloadConfig {
@@ -42,6 +55,8 @@ export class SettingsStore {
       if (typeof saved.agentBaseUrl === 'string' && saved.agentBaseUrl.trim()) this.value.agentBaseUrl = saved.agentBaseUrl.trim();
       if (typeof saved.agentVision === 'boolean') this.value.agentVision = saved.agentVision;
       if (typeof saved.agentThinking === 'string' && saved.agentThinking.trim()) this.value.agentThinking = saved.agentThinking.trim();
+      if (isContextWindow(saved.agentContextWindow)) this.value.agentContextWindow = saved.agentContextWindow;
+      if (typeof saved.agentReasoning === 'boolean') this.value.agentReasoning = saved.agentReasoning;
       if (saved.agentApprovalMode === 'risky' || saved.agentApprovalMode === 'always') this.value.agentApprovalMode = saved.agentApprovalMode;
       if (isModelSource(saved.modelSource)) this.value.modelSource = saved.modelSource;
       if (typeof saved.modelEndpoint === 'string' && saved.modelEndpoint.trim()) this.value.modelEndpoint = saved.modelEndpoint.trim();
@@ -56,6 +71,9 @@ export class SettingsStore {
     if (!this.value.agentBaseUrl && process.env.AGENT_BASE_URL?.trim()) this.value.agentBaseUrl = process.env.AGENT_BASE_URL.trim();
     if (this.value.agentVision === undefined && process.env.AGENT_VISION !== undefined) this.value.agentVision = process.env.AGENT_VISION === '1';
     if (!this.value.agentThinking && process.env.AGENT_THINKING?.trim()) this.value.agentThinking = process.env.AGENT_THINKING.trim();
+    const envWindow = envContextWindow();
+    if (this.value.agentContextWindow === undefined && envWindow) this.value.agentContextWindow = envWindow;
+    if (this.value.agentReasoning === undefined && process.env.AGENT_REASONING !== undefined) this.value.agentReasoning = process.env.AGENT_REASONING === '1';
     if (this.value.language) setServerLang(this.value.language);
     this.updateAgentKeyStatus();
     this.updateHfTokenStatus();
@@ -109,7 +127,9 @@ export class SettingsStore {
     const vision = this.value.agentVision ?? process.env.AGENT_VISION === '1';
     const thinking = this.value.agentThinking?.trim() || process.env.AGENT_THINKING?.trim() || 'low';
     const approvalMode = this.value.agentApprovalMode === 'always' ? 'always' : 'risky';
-    return { model, baseUrl, apiKey, vision, thinking, approvalMode };
+    const contextWindow = this.value.agentContextWindow ?? envContextWindow();
+    const reasoning = this.value.agentReasoning ?? process.env.AGENT_REASONING === '1';
+    return { model, baseUrl, apiKey, vision, thinking, approvalMode, contextWindow, reasoning };
   }
 
   async saveAgentConfig(patch: {
@@ -118,6 +138,9 @@ export class SettingsStore {
     vision?: boolean;
     thinking?: string;
     approvalMode?: 'risky' | 'always';
+    /** null: back to the default. */
+    contextWindow?: number | null;
+    reasoning?: boolean;
     apiKey?: string;
     clearApiKey?: boolean;
   }) {
@@ -138,6 +161,9 @@ export class SettingsStore {
       else delete this.value.agentThinking;
     }
     if (patch.approvalMode !== undefined) this.value.agentApprovalMode = patch.approvalMode;
+    if (patch.contextWindow === null) delete this.value.agentContextWindow;
+    else if (patch.contextWindow !== undefined) this.value.agentContextWindow = patch.contextWindow;
+    if (patch.reasoning !== undefined) this.value.agentReasoning = patch.reasoning;
     if (patch.clearApiKey) this.agentApiKey = undefined;
     if (patch.apiKey?.trim()) this.agentApiKey = patch.apiKey.trim();
     this.updateAgentKeyStatus();

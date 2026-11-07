@@ -328,6 +328,11 @@ export const EN: Record<string, Translation> = {
   'API key 已配置，留空保持不变': 'API key is configured; leave blank to keep it',
   'API key（本地模型可留空）': 'API key (optional for local models)',
   启用视觉输入: 'Enable vision input',
+  '上下文长度（token），留空按 128000': 'Context length in tokens (blank: 128000)',
+  推理模型: 'Reasoning model',
+  '填模型实际的上下文长度：填大了，长对话会在整理摘要前超长报错。勾选「推理模型」才会把思考等级发给它。':
+    'Enter the model’s real context length: if it is set too high, long conversations fail before they get condensed. The thinking level is only sent when "Reasoning model" is checked.',
+  '上下文长度要填 {min}–{max} 之间的整数（单位 token）': 'Context length must be a whole number of tokens between {min} and {max}',
   思考: 'Thinking',
   操作确认: 'Operation approval',
   高风险操作确认: 'Ask for high-risk operations',

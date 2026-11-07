@@ -29,6 +29,9 @@ export type AgentSettingsPatch = {
   agentVision?: boolean;
   agentThinking?: string;
   agentApprovalMode?: 'risky' | 'always';
+  /** null: back to the default. */
+  agentContextWindow?: number | null;
+  agentReasoning?: boolean;
 };
 export type ModelSettingsPatch = {
   modelSource?: ModelSource;
@@ -124,7 +127,7 @@ export const api = {
   branchProject: (id: string, snapshotId: string, name?: string) => request<Project>(`/api/projects/${id}/branches`, json('POST', { snapshotId, name })),
 
   settings: () => request<Settings>('/api/settings'),
-  saveSettings: (patch: Partial<Settings> & AgentSettingsPatch & ModelSettingsPatch) =>
+  saveSettings: (patch: Omit<Partial<Settings>, keyof AgentSettingsPatch> & AgentSettingsPatch & ModelSettingsPatch) =>
     request<{ settings: Settings; capabilities: Capabilities }>('/api/settings', json('PUT', patch)),
   testComfy: (comfyUrl: string) =>
     request<{ ok: boolean; url?: string; version?: string; gpu?: string; error?: string }>('/api/settings/test', json('POST', { comfyUrl })),

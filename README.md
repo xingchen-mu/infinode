@@ -157,6 +157,8 @@ DEEPSEEK_API_KEY=sk-...                   # 默认模型 deepseek/deepseek-flash
 # AGENT_MODEL=qwen3:32b
 # AGENT_API_KEY=...
 # AGENT_VISION=1                          # 这个模型能看图
+# AGENT_CONTEXT_WINDOW=32768              # 这个模型的上下文长度（token），不填按 128000
+# AGENT_REASONING=1                       # 这是推理模型，会把 AGENT_THINKING 的思考等级发给它
 ```
 
 助手会把画布概况（节点名称、提示词、文本内容）和它查看的图片发给你配置的模型服务。key 只保存在你的机器上；把画布共享到局域网时，助手也只能在运行服务的那台电脑上使用。

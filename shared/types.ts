@@ -316,6 +316,10 @@ export interface Settings {
   agentBaseUrl?: string;
   agentVision?: boolean;
   agentThinking?: string;
+  /** For an OpenAI-compatible endpoint (agentBaseUrl): the model's context length in tokens (128000 when unset). */
+  agentContextWindow?: number;
+  /** For an OpenAI-compatible endpoint: the model reasons, so agentThinking is sent to it. */
+  agentReasoning?: boolean;
   /** Whether the assistant asks before every write operation. */
   agentApprovalMode?: 'risky' | 'always';
   agentApiKeyConfigured?: boolean;

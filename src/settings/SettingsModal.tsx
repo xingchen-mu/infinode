@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, Download, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { LANGS, type Lang } from '../../shared/i18n';
 import { LICENSES, isBlock, licenseLabel, licenseTitle } from '../../shared/licenses';
-import type { ModelInstallInfo, ModelSource } from '../../shared/types';
+import type { ModelInstallInfo, ModelSource, Settings } from '../../shared/types';
 import { activeDownload, openDownloads } from '../models/actions';
 import { SourcePicker, modeLine, sourceHelp } from '../models/DownloadsModal';
 import { api } from '../lib/api';
@@ -12,6 +12,19 @@ import { lang, rememberLang, rich, t } from '../i18n';
 import { Modal } from '../components/Modal';
 
 const close = () => useStore.setState({ modal: null });
+
+/** The saved assistant settings, to tell whether the form changed. */
+const agentSnapshot = (s: Settings) =>
+  JSON.stringify([
+    s.agentModel ?? '',
+    s.agentBaseUrl ?? '',
+    Boolean(s.agentVision),
+    s.agentThinking ?? 'low',
+    s.agentApprovalMode ?? 'risky',
+    s.agentContextWindow ? String(s.agentContextWindow) : '',
+    Boolean(s.agentReasoning),
+    Boolean(s.agentApiKeyConfigured),
+  ]);
 
 const BUILTIN_NAMES: Record<string, string> = {
   'image.generate:qwen': t('Qwen-Image 2.1 生图 / 参考图编辑'),
@@ -38,6 +51,8 @@ export function SettingsModal() {
   const [agentVision, setAgentVision] = useState(false);
   const [agentThinking, setAgentThinking] = useState('low');
   const [agentApprovalMode, setAgentApprovalMode] = useState<'risky' | 'always'>('risky');
+  const [agentContextWindow, setAgentContextWindow] = useState('');
+  const [agentReasoning, setAgentReasoning] = useState(false);
   const [agentSaved, setAgentSaved] = useState('');
   const [busy, setBusy] = useState<'test' | 'save' | 'license' | 'agent' | 'models' | null>(null);
   const downloads = useStore((s) => s.downloads);
@@ -47,18 +62,24 @@ export function SettingsModal() {
   const [hfToken, setHfToken] = useState('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const showAgent = (s: Settings) => {
+    setAgentModel(s.agentModel ?? '');
+    setAgentBaseUrl(s.agentBaseUrl ?? '');
+    setAgentKeyConfigured(Boolean(s.agentApiKeyConfigured));
+    setAgentVision(Boolean(s.agentVision));
+    setAgentThinking(s.agentThinking ?? 'low');
+    setAgentApprovalMode(s.agentApprovalMode ?? 'risky');
+    setAgentContextWindow(s.agentContextWindow ? String(s.agentContextWindow) : '');
+    setAgentReasoning(Boolean(s.agentReasoning));
+    setAgentSaved(agentSnapshot(s));
+  };
+
   useEffect(() => {
     void api.settings().then((s) => {
       setUrl(s.comfyUrl);
       setSaved(s.comfyUrl);
       setCommercial(Boolean(s.commercialOnly));
-      setAgentModel(s.agentModel ?? '');
-      setAgentBaseUrl(s.agentBaseUrl ?? '');
-      setAgentKeyConfigured(Boolean(s.agentApiKeyConfigured));
-      setAgentVision(Boolean(s.agentVision));
-      setAgentThinking(s.agentThinking ?? 'low');
-      setAgentApprovalMode(s.agentApprovalMode ?? 'risky');
-      setAgentSaved(JSON.stringify([s.agentModel ?? '', s.agentBaseUrl ?? '', Boolean(s.agentVision), s.agentThinking ?? 'low', s.agentApprovalMode ?? 'risky', Boolean(s.agentApiKeyConfigured)]));
+      showAgent(s);
     });
     void loadInstall();
   }, []);
@@ -151,17 +172,13 @@ export function SettingsModal() {
         agentVision,
         agentThinking,
         agentApprovalMode,
+        agentContextWindow: agentContextWindow.trim() ? Number(agentContextWindow) : null,
+        agentReasoning,
         ...(agentApiKey.trim() ? { agentApiKey: agentApiKey.trim() } : {}),
         ...(clearApiKey ? { clearAgentApiKey: true } : {}),
       });
-      setAgentModel(r.settings.agentModel ?? '');
-      setAgentBaseUrl(r.settings.agentBaseUrl ?? '');
-      setAgentVision(Boolean(r.settings.agentVision));
-      setAgentThinking(r.settings.agentThinking ?? 'low');
-      setAgentApprovalMode(r.settings.agentApprovalMode ?? 'risky');
-      setAgentKeyConfigured(Boolean(r.settings.agentApiKeyConfigured));
+      showAgent(r.settings);
       setAgentApiKey('');
-      setAgentSaved(JSON.stringify([r.settings.agentModel ?? '', r.settings.agentBaseUrl ?? '', Boolean(r.settings.agentVision), r.settings.agentThinking ?? 'low', r.settings.agentApprovalMode ?? 'risky', Boolean(r.settings.agentApiKeyConfigured)]));
       toast(t('画布助手配置已保存'), 'success');
     } catch (err) {
       toast((err as Error).message, 'error');
@@ -170,7 +187,20 @@ export function SettingsModal() {
     }
   };
 
-  const agentDirty = JSON.stringify([agentModel, agentBaseUrl, agentVision, agentThinking, agentApprovalMode, agentKeyConfigured || Boolean(agentApiKey)]) !== agentSaved;
+  const agentDirty =
+    agentSnapshot({
+      comfyUrl: '',
+      agentModel,
+      agentBaseUrl,
+      agentVision,
+      agentThinking,
+      agentApprovalMode,
+      agentContextWindow: Number(agentContextWindow) || undefined,
+      agentReasoning,
+      agentApiKeyConfigured: agentKeyConfigured || Boolean(agentApiKey),
+    }) !== agentSaved;
+  /** An OpenAI-compatible endpoint: the app cannot look up its model's context length or whether it reasons. */
+  const customAgent = Boolean(agentBaseUrl.trim());
 
   const builtins = Object.keys(BUILTIN_NAMES);
   return (
@@ -225,9 +255,18 @@ export function SettingsModal() {
         <input className="m-input" value={agentModel} placeholder={t('deepseek/deepseek-flash 或 llama3.1')} spellCheck={false} onChange={(e) => setAgentModel(e.target.value)} />
         <input className="m-input" value={agentBaseUrl} placeholder={t('https://api.deepseek.com/v1（自定义接口地址）')} spellCheck={false} onChange={(e) => setAgentBaseUrl(e.target.value)} />
         <input className="m-input" type="password" value={agentApiKey} placeholder={agentKeyConfigured ? t('API key 已配置，留空保持不变') : t('API key（本地模型可留空）')} autoComplete="off" onChange={(e) => setAgentApiKey(e.target.value)} />
+        {customAgent && (
+          <>
+            <div className="m-row">
+              <input className="m-input" type="number" min={16000} step={1024} value={agentContextWindow} placeholder={t('上下文长度（token），留空按 128000')} onChange={(e) => setAgentContextWindow(e.target.value)} />
+              <label className="m-check"><input type="checkbox" checked={agentReasoning} onChange={(e) => setAgentReasoning(e.target.checked)} /><span>{t('推理模型')}</span></label>
+            </div>
+            <div className="m-help">{t('填模型实际的上下文长度：填大了，长对话会在整理摘要前超长报错。勾选「推理模型」才会把思考等级发给它。')}</div>
+          </>
+        )}
         <div className="m-row">
           <label className="m-check"><input type="checkbox" checked={agentVision} onChange={(e) => setAgentVision(e.target.checked)} /><span>{t('启用视觉输入')}</span></label>
-          <label className="m-help">{t('思考')} <select value={agentThinking} onChange={(e) => setAgentThinking(e.target.value)}><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
+          <label className="m-help">{t('思考')} <select value={agentThinking} disabled={customAgent && !agentReasoning} onChange={(e) => setAgentThinking(e.target.value)}><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
         </div>
         <label className="m-help">{t('操作确认')} <select value={agentApprovalMode} onChange={(e) => setAgentApprovalMode(e.target.value as 'risky' | 'always')}><option value="risky">{t('高风险操作确认')}</option><option value="always">{t('所有写入操作确认')}</option></select></label>
         <div className="m-help">{agentApprovalMode === 'always' ? t('助手修改画布、提交生成或运行工作流前都会先等你确认。') : t('视频批量生成等高成本操作会确认，普通操作直接执行。')}</div>

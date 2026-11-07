@@ -209,10 +209,17 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
       agentApiKey: 'route-test-secret',
       agentVision: true,
       agentThinking: 'medium',
+      agentContextWindow: 32768,
+      agentReasoning: true,
     });
     assert.equal(customSettings.status, 200);
     const publicSettings = await (await request('/api/settings')).json();
     assert.equal(publicSettings.agentModel, 'local-chat');
+    assert.equal(publicSettings.agentContextWindow, 32768);
+    assert.equal(publicSettings.agentReasoning, true);
+    assert.equal((await request('/api/settings', 'PUT', { agentContextWindow: 4096 })).status, 400, 'too small to hold the instructions');
+    assert.equal((await request('/api/settings', 'PUT', { agentContextWindow: 32768.5 })).status, 400);
+    assert.equal((await (await request('/api/settings')).json()).agentContextWindow, 32768, 'a rejected value changes nothing');
     assert.equal(publicSettings.agentBaseUrl, 'http://127.0.0.1:11434/v1');
     assert.equal(publicSettings.agentApiKeyConfigured, true);
     assert.equal('agentApiKey' in publicSettings, false);

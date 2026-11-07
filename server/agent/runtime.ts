@@ -40,6 +40,15 @@ const EVENT = /^<canvas_event>([\s\S]*)<\/canvas_event>$/;
 const SUMMARY = /^<canvas_summary>[\s\S]*<\/canvas_summary>$/;
 /** User turns (typed or events) kept word for word when a long conversation is condensed. */
 const KEEP_TURNS = 4;
+/** Context size (tokens of the last request) at which the early conversation is condensed, for large windows. */
+const COMPACT_AT = 100_000;
+/** The user's own messages carried word for word through condensing: each clipped, all within a budget. */
+const WORD_CHARS = 1500;
+const WORDS_BUDGET = 6000;
+const SAID = /<said>([\s\S]*?)<\/said>/g;
+const WORDS_HEAD = /\n*用户说过的原话（[^\n]*：\s*$/;
+/** Context length assumed for an OpenAI-compatible endpoint that does not say. */
+const CUSTOM_CONTEXT = 128_000;
 /** Runs started by finished tasks in a row, before it waits for the user. */
 const MAX_AUTO_RUNS = 40;
 const IMAGE_DROPPED = '[这张图片已从上下文中移除，需要时用 view_images 重新查看]';
@@ -90,19 +99,23 @@ const AGENT_APPROVAL = '__infinode_agent_approval';
 
 const ACTIVE = new Set(['queued', 'running']);
 
-/** AGENT_BASE_URL: any OpenAI-compatible endpoint (豆包、百炼、Ollama、vLLM…), with AGENT_MODEL naming the model there. */
-function customProvider(baseUrl: string, modelId: string, apiKey: string | undefined, vision: boolean): Provider {
+/**
+ * AGENT_BASE_URL: any OpenAI-compatible endpoint (豆包、百炼、Ollama、vLLM…), with AGENT_MODEL naming the model there.
+ * pi-ai trims each request's max tokens to what the context window leaves, so the window has to be the server's real one.
+ */
+function customProvider(baseUrl: string, modelId: string, apiKey: string | undefined, opts: { vision: boolean; reasoning: boolean; contextWindow?: number }): Provider {
   const model: Model<'openai-completions'> = {
     id: modelId,
     name: modelId,
     api: 'openai-completions',
     provider: 'custom',
     baseUrl,
-    reasoning: false,
-    input: vision ? ['text', 'image'] : ['text'],
+    reasoning: opts.reasoning,
+    input: opts.vision ? ['text', 'image'] : ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 8192,
+    contextWindow: opts.contextWindow ?? CUSTOM_CONTEXT,
+    // Thinking shares the output budget with the answer.
+    maxTokens: opts.reasoning ? 32_768 : 8192,
   };
   return createProvider({
     id: 'custom',
@@ -156,11 +169,22 @@ function usageOf(messages: AgentMessage[]): AgentUsage {
   return usage;
 }
 
-/** The early conversation as plain text for the summary (long parts clipped). */
-function transcriptText(messages: AgentMessage[]): string {
+/**
+ * When to condense: well inside the model's window, since a run adds tool results and images before the
+ * next check, and the summary request itself has to fit.
+ */
+export function compactThreshold(contextWindow: number | undefined): number {
+  return contextWindow && contextWindow > 0 ? Math.min(COMPACT_AT, Math.floor(contextWindow * 0.6)) : COMPACT_AT;
+}
+
+/** The early conversation as plain text for the summary (long parts clipped to `max` characters in all). */
+function transcriptText(messages: AgentMessage[], max: number): string {
   const lines: string[] = [];
   for (const m of messages) {
-    if (m.role === 'user') lines.push(`【用户】${clip(textOf(m.content), 2000)}`);
+    if (m.role === 'user') {
+      const text = textOf(m.content).trim();
+      lines.push(SUMMARY.test(text) ? `【之前的整理】${summaryText(text)}` : `【用户】${clip(text, 2000)}`);
+    }
     else if (m.role === 'toolResult') lines.push(`【结果】${clip(textOf(m.content), 800)}`);
     else if (m.role === 'assistant') {
       for (const c of m.content) {
@@ -169,7 +193,43 @@ function transcriptText(messages: AgentMessage[]): string {
       }
     }
   }
-  return clip(lines.join('\n'), 120_000);
+  return clip(lines.join('\n'), max);
+}
+
+/** A summary message without its tags and the user's words carried in it. */
+function summaryText(message: string): string {
+  return message.replace(/^<canvas_summary>\n?/, '').replace(/\n?<\/canvas_summary>$/, '').replace(SAID, '').replace(WORDS_HEAD, '').trim();
+}
+
+/**
+ * What the user typed in these messages, oldest first, without the board context: those words are what
+ * a summary loses most easily, and the events that resume a long batch would otherwise push them out.
+ */
+function userWords(messages: AgentMessage[]): string[] {
+  const words: string[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+    const raw = textOf(m.content).trim();
+    if (SUMMARY.test(raw)) words.push(...[...raw.matchAll(SAID)].map((x) => x[1].trim()));
+    else if (!EVENT.test(raw)) words.push(raw.replace(CONTEXT, '').trim());
+  }
+  return words.filter(Boolean).map((w) => clip(w, WORD_CHARS));
+}
+
+/** The summary as the model reads it: the condensed text, then the user's first words and as many recent ones as fit. */
+function summaryMessage(summary: string, words: string[]): string {
+  const keep = new Set<number>(words.length ? [0] : []);
+  let used = words[0]?.length ?? 0;
+  for (let i = words.length - 1; i > 0 && used + words[i].length <= WORDS_BUDGET; i--) {
+    keep.add(i);
+    used += words[i].length;
+  }
+  const skipped = words.length - keep.size;
+  const said = words.filter((_, i) => keep.has(i)).map((w) => `<said>${w}</said>`);
+  const quoted = said.length
+    ? `\n\n用户说过的原话（按时间顺序，长的截断了${skipped ? `；中间有 ${skipped} 条没列出，要点在上面的整理里` : ''}）：\n${said.join('\n')}`
+    : '';
+  return `<canvas_summary>\n${summary}${quoted}\n</canvas_summary>`;
 }
 
 function userEntry(m: UserMessage): AgentEntry {
@@ -207,7 +267,7 @@ export class AgentHub {
   private watches: Watch[] = [];
   private readonly watchFile: string;
   /** Context size (tokens of the last request) at which the early conversation is condensed. */
-  private readonly compactAt: number;
+  private compactAt = COMPACT_AT;
   private models: Models;
   private model?: Model<Api>;
   private thinking!: ThinkingLevel;
@@ -231,7 +291,6 @@ export class AgentHub {
     this.models = opts.models ?? builtinModels();
     this.tools = canvasTools(deps, new ResultWriter(deps));
     this.labels = new Map(this.tools.map((t) => [t.name, t]));
-    this.compactAt = opts.compactAt ?? 100_000;
     this.configureModel();
     deps.tasks.on('task', (t: Task) => this.onTask(t));
     this.setModelState();
@@ -245,17 +304,20 @@ export class AgentHub {
       vision: process.env.AGENT_VISION === '1',
       thinking: process.env.AGENT_THINKING?.trim() || 'low',
       approvalMode: 'risky' as const,
+      contextWindow: Number(process.env.AGENT_CONTEXT_WINDOW) || undefined,
+      reasoning: process.env.AGENT_REASONING === '1',
     };
     const models = this.opts.models ?? builtinModels();
     let name = cfg.model;
     if (cfg.baseUrl && !this.opts.models) {
-      (models as ReturnType<typeof builtinModels>).setProvider(customProvider(cfg.baseUrl, name, cfg.apiKey, cfg.vision));
+      (models as ReturnType<typeof builtinModels>).setProvider(customProvider(cfg.baseUrl, name, cfg.apiKey, cfg));
       name = `custom/${name}`;
     }
     this.models = models;
     const slash = name.indexOf('/');
     this.model = slash > 0 ? this.models.getModel(name.slice(0, slash), name.slice(slash + 1)) : undefined;
     this.vision = Boolean(this.model?.input.includes('image'));
+    this.compactAt = this.opts.compactAt ?? compactThreshold(this.model?.contextWindow);
     this.approvalMode = cfg.approvalMode;
     const wanted = cfg.thinking as ThinkingLevel;
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
@@ -673,8 +735,8 @@ export class AgentHub {
 
   /**
    * Long conversations cost more on every request: once the last request's context passed `compactAt`,
-   * everything before the last few user turns is condensed by the model into a summary. The panel keeps
-   * the old rows.
+   * everything before the last few user turns is condensed by the model into a summary, with what the user
+   * typed carried along word for word. The panel keeps the old rows.
    */
   private async compactIfLong(s: Session) {
     const messages = s.agent.state.messages;
@@ -690,7 +752,8 @@ export class AgentHub {
     this.event(s, t('对话比较长了，正在把较早的部分整理成摘要…'));
     const reply = await this.models.completeSimple(this.model, {
       systemPrompt: SUMMARY_PROMPT,
-      messages: [{ role: 'user', content: transcriptText(old), timestamp: Date.now() }],
+      // In characters: Chinese runs about a token each, so this fits even a small window.
+      messages: [{ role: 'user', content: transcriptText(old, Math.min(120_000, Math.floor((this.model.contextWindow || Infinity) * 0.6))), timestamp: Date.now() }],
     });
     const summary = reply.content
       .map((c) => (c.type === 'text' ? c.text : ''))
@@ -704,7 +767,7 @@ export class AgentHub {
     s.archived = [...s.archived, ...this.entriesOf(old, s)];
     s.agent.state.messages = [
       ...early.filter((m) => m.role === 'system'),
-      { role: 'user', content: `<canvas_summary>\n${summary}\n</canvas_summary>`, timestamp: Date.now() },
+      { role: 'user', content: summaryMessage(summary, userWords(old)), timestamp: Date.now() },
       ...messages.slice(cut),
     ];
     await this.save(s);

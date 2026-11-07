@@ -1,7 +1,7 @@
 import type { Lang } from '../../shared/i18n.ts';
 
 /** Instructions for condensing the early part of a long conversation. */
-export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考（原文会被删掉，只留你的整理）。
+export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考（原文会被删掉，只留你的整理；用户自己打的字会另外原样附在后面，不用逐字抄）。
 保留：用户的目标和要求、确认过的决定和偏好、画布上重要节点的 id 和它们是什么（剧本、分镜表、设定图、关键帧、视频、成片等）、还没做完的事和下一步。
 不要编造，不要写客套话。用中文，条目式，不超过 800 字。`;
 

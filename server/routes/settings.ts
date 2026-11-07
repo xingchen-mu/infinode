@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { isLang } from '../../shared/i18n.ts';
 import { ComfyClient } from '../comfy/client.ts';
-import { isModelSource, normalizeComfyUrl } from '../settings.ts';
+import { CONTEXT_WINDOW, isContextWindow, isModelSource, normalizeComfyUrl } from '../settings.ts';
 import { normalizeEndpoint } from '../models/sources.ts';
 import { RequestError } from '../workflows/index.ts';
 import { t } from '../i18n.ts';
@@ -40,6 +40,9 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
       agentVision?: boolean;
       agentThinking?: string;
       agentApprovalMode?: 'risky' | 'always';
+      /** null: back to the default. */
+      agentContextWindow?: number | null;
+      agentReasoning?: boolean;
       modelSource?: unknown;
       modelEndpoint?: string;
       hfToken?: string;
@@ -86,8 +89,20 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         clearHfToken: body.clearHfToken === true,
       });
     }
-    const agentChanged = body.agentModel !== undefined || body.agentBaseUrl !== undefined || body.agentApiKey !== undefined || body.clearAgentApiKey === true || body.agentVision !== undefined || body.agentThinking !== undefined || body.agentApprovalMode !== undefined;
+    const agentChanged =
+      body.agentModel !== undefined ||
+      body.agentBaseUrl !== undefined ||
+      body.agentApiKey !== undefined ||
+      body.clearAgentApiKey === true ||
+      body.agentVision !== undefined ||
+      body.agentThinking !== undefined ||
+      body.agentApprovalMode !== undefined ||
+      body.agentContextWindow !== undefined ||
+      body.agentReasoning !== undefined;
     if (agentChanged) {
+      if (body.agentContextWindow !== undefined && body.agentContextWindow !== null && !isContextWindow(body.agentContextWindow)) {
+        throw new RequestError(t('上下文长度要填 {min}–{max} 之间的整数（单位 token）', { min: CONTEXT_WINDOW.min, max: CONTEXT_WINDOW.max }));
+      }
       let baseUrl: string | undefined;
       if (body.agentBaseUrl !== undefined) {
         const input = body.agentBaseUrl.trim();
@@ -109,6 +124,8 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         vision: typeof body.agentVision === 'boolean' ? body.agentVision : undefined,
         thinking: body.agentThinking,
         approvalMode: body.agentApprovalMode === 'always' || body.agentApprovalMode === 'risky' ? body.agentApprovalMode : undefined,
+        contextWindow: body.agentContextWindow,
+        reasoning: typeof body.agentReasoning === 'boolean' ? body.agentReasoning : undefined,
       });
       await agent.reconfigure();
     }
