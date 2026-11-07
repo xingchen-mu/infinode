@@ -162,14 +162,34 @@ async function latestImagesOnly(messages: AgentMessage[]): Promise<AgentMessage[
   return messages.map((m, i) => (i === keep ? m : withoutImages(m)));
 }
 
+/**
+ * Tokens the panel counts: all but cache reads. A long conversation re-reads the whole context from the
+ * cache on every request, at a sliver of the price; counted in, millions of tokens would cost a few cents.
+ */
+function paidTokens(u: AssistantMessage['usage'] | undefined): number {
+  return u ? u.input + u.output + u.cacheWrite : 0;
+}
+
 function usageOf(messages: AgentMessage[]): AgentUsage {
   const usage = { tokens: 0, cost: 0 };
   for (const m of messages) {
     if (m.role !== 'assistant') continue;
-    usage.tokens += m.usage?.totalTokens ?? 0;
+    usage.tokens += paidTokens(m.usage);
     usage.cost += m.usage?.cost?.total ?? 0;
   }
   return usage;
+}
+
+/**
+ * Saves before version 3 counted cache reads in. The messages still there are recounted; the condensed
+ * part, whose messages are gone, keeps the share of cache reads the rest of the conversation had.
+ */
+function recount(saved: AgentUsage, messages: AgentMessage[]): AgentUsage {
+  const assistant = messages.filter((m) => m.role === 'assistant');
+  const all = assistant.reduce((n, m) => n + (m.usage?.totalTokens ?? 0), 0);
+  const paid = assistant.reduce((n, m) => n + paidTokens(m.usage), 0);
+  const gone = Math.max(0, saved.tokens - all);
+  return { tokens: Math.round(paid + gone * (all ? paid / all : 1)), cost: saved.cost };
 }
 
 /**
@@ -520,7 +540,7 @@ export class AgentHub {
   private async open(projectId: string): Promise<Session> {
     if (!ID.test(projectId) || !(await this.deps.projects.get(projectId))) throw new RequestError(t('画布不存在'));
     if (!this.model) throw new RequestError(this.status.reason ?? t('画布助手还没有配置好'));
-    let saved: { messages?: AgentMessage[]; usage?: AgentUsage; archived?: AgentEntry[] } = {};
+    let saved: { version?: number; messages?: AgentMessage[]; usage?: AgentUsage; archived?: AgentEntry[] } = {};
     try {
       saved = JSON.parse(await readFile(this.file(projectId), 'utf8'));
     } catch {
@@ -535,7 +555,7 @@ export class AgentHub {
       autoRuns: 0,
       commercial,
       lang: serverLang(),
-      usage: saved.usage ?? usageOf(messages),
+      usage: !saved.usage ? usageOf(messages) : (saved.version ?? 0) < 3 ? recount(saved.usage, messages) : saved.usage,
       archived: saved.archived ?? [],
     } as unknown as Session;
     s.agent = new Agent({
@@ -796,13 +816,14 @@ export class AgentHub {
   }
 
   private addUsage(s: Session, m: AssistantMessage) {
-    s.usage = { tokens: s.usage.tokens + (m.usage?.totalTokens ?? 0), cost: s.usage.cost + (m.usage?.cost?.total ?? 0) };
+    s.usage = { tokens: s.usage.tokens + paidTokens(m.usage), cost: s.usage.cost + (m.usage?.cost?.total ?? 0) };
   }
 
   /** In line behind any save still running (a run's last save can overlap the next run's first). */
   private save(s: Session) {
     return writeJson(this.file(s.projectId), () => ({
-      version: 2,
+      // 3: usage.tokens leaves out cache reads.
+      version: 3,
       messages: s.agent.state.messages.filter((m) => m.role !== 'system').map(withoutImages),
       usage: s.usage,
       archived: s.archived,

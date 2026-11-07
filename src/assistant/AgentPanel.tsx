@@ -302,8 +302,8 @@ export function AgentPanel() {
             className="agent-usage"
             title={
               lang === 'zh'
-                ? t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准）', { rate: CNY_PER_USD })
-                : t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）')
+                ? t('这段对话用掉的 tokens 和费用。tokens 不算命中缓存的部分，那部分几乎不花钱；费用按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准', { rate: CNY_PER_USD })
+                : t('这段对话用掉的 tokens 和费用。tokens 不算命中缓存的部分，那部分几乎不花钱；费用按模型的公开价格估算，以服务商账单为准')
             }
           >
             {usageText(usage)}

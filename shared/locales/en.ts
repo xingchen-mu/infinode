@@ -167,10 +167,10 @@ export const EN: Record<string, Translation> = {
   '画布助手：说一句话，让它在画布上出图、出视频': 'Canvas assistant: ask in a sentence and it makes images and videos on the board',
   助手: 'Assistant',
   画布助手: 'Assistant',
-  '这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）':
-    "Tokens and cost of this conversation (estimated from the model's list price; your provider's bill is what counts)",
-  '这段对话用掉的 tokens 和费用（按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准）':
-    "Tokens and cost of this conversation (estimated from the model's list price, in yuan at 1 USD = {rate} CNY; your provider's bill is what counts)",
+  '这段对话用掉的 tokens 和费用。tokens 不算命中缓存的部分，那部分几乎不花钱；费用按模型的公开价格估算，以服务商账单为准':
+    "Tokens and cost of this conversation. Tokens leave out cache hits, which cost next to nothing; the cost is estimated from the model's list price, and your provider's bill is what counts",
+  '这段对话用掉的 tokens 和费用。tokens 不算命中缓存的部分，那部分几乎不花钱；费用按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准':
+    "Tokens and cost of this conversation. Tokens leave out cache hits, which cost next to nothing; the cost is estimated from the model's list price, in yuan at 1 USD = {rate} CNY, and your provider's bill is what counts",
   新对话: 'New conversation',
   收起: 'Close',
   '说说你想做什么，助手会在画布上出图、出视频，并把结果连到用到的节点上。':

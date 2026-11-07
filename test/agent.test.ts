@@ -1,7 +1,7 @@
 // The canvas assistant end to end with pi's faux model: no API key, no ComfyUI.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -240,6 +240,33 @@ test('deleting finished images waits for its own card, also when every write nee
   await hub.send(board.id, { text: '删好了吗' });
   await settled(hub, board.id);
   assert.match(context, /用户已确认。已从画布删掉 1 个节点/);
+});
+
+test('the token count leaves out cache reads, also for a conversation saved before the change', async () => {
+  const board = await projects.create('tokens');
+  const { hub } = await hubWith(fakeTasks(), [say('好的'), say('还在')]);
+  for (const text of ['你好', '在吗']) {
+    await hub.send(board.id, { text });
+    await settled(hub, board.id);
+  }
+  // The faux model reports its own usage, cache reads included: the count takes all but those.
+  const file = join(process.env.DATA_DIR!, 'agent', `${board.id}.json`);
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  const usages = saved.messages.filter((m: AssistantMessage) => m.role === 'assistant').map((m: AssistantMessage) => m.usage);
+  const paid = usages.reduce((n: number, u: AssistantMessage['usage']) => n + u.input + u.output + u.cacheWrite, 0);
+  assert.ok(usages.some((u: AssistantMessage['usage']) => u.cacheRead > 0), 'the second request reads the first from the cache');
+  assert.equal(saved.version, 3);
+  assert.equal(saved.usage.tokens, paid);
+  assert.equal((await hub.view(board.id)).usage.tokens, paid);
+
+  // As saved before: 30 000 tokens with cache reads, 9150 of them in the one reply still there, the rest condensed.
+  const reply = saved.messages.find((m: AssistantMessage) => m.role === 'assistant');
+  reply.usage = { ...reply.usage, input: 100, output: 50, cacheRead: 9000, cacheWrite: 0, totalTokens: 9150 };
+  const messages = saved.messages.slice(0, saved.messages.indexOf(reply) + 1);
+  writeFileSync(file, JSON.stringify({ ...saved, version: 2, messages, usage: { tokens: 30_000, cost: 0.01 } }));
+  const { hub: restarted } = await hubWith(fakeTasks(), []);
+  // 150 counted again, and the condensed 20 850 at the same share of paid tokens (150 of 9150).
+  assert.deepEqual((await restarted.view(board.id)).usage, { tokens: 492, cost: 0.01 });
 });
 
 test('a board keeps the latest ten snapshots the assistant took on its own; the ones the user saved stay', async () => {
