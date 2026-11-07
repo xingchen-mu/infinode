@@ -166,6 +166,10 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
     const used = (await (await request('/api/assets')).json())[0] as AssetInfo;
     assert.equal(used.usage?.references, 1);
     assert.equal(used.usage?.projects[0]?.name, 'Asset usage');
+    assert.equal(used.usage?.name, undefined);
+    // The asset library shows the name its node has on the board.
+    await request(`/api/projects/${usageProject.id}/items`, 'PATCH', { upsert: [{ id: 'asset-ref', kind: 'image', x: 0, y: 0, w: 100, h: 100, asset, name: 'E01-03 镜3', createdAt: Date.now() }] });
+    assert.equal(((await (await request('/api/assets')).json())[0] as AssetInfo).usage?.name, 'E01-03 镜3');
     await request(`/api/projects/${usageProject.id}`, 'DELETE');
     assert.deepEqual(Buffer.from(await (await request(asset.url)).arrayBuffer()), png);
     assert.deepEqual(await readFile(join(dataDir, 'assets', asset.url.split('/').pop()!)), png);

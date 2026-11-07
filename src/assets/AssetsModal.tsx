@@ -15,11 +15,22 @@ function Preview({ asset }: { asset: AssetInfo }) {
   if (asset.kind === 'video') {
     return <video src={asset.url} poster={thumbUrl(asset.url)} muted playsInline preload="metadata" onError={() => setFailed(true)} />;
   }
-  return <img src={thumbUrl(asset.url)} alt={asset.name ?? ''} loading="lazy" onError={() => setFailed(true)} />;
+  return <img src={thumbUrl(asset.url)} alt={assetTitle(asset)} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function kindLabel(kind: MediaKind) {
   return kind === 'video' ? t('视频') : t('图片');
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** The name of a board node showing it, else its own (uploads keep the file name), else its type and when it was made. */
+export function assetTitle(asset: AssetInfo): string {
+  const name = asset.usage?.name ?? asset.name;
+  if (name) return name;
+  if (!asset.createdAt) return t('未命名资产');
+  const d = new Date(asset.createdAt);
+  return `${kindLabel(asset.kind)} · ${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function AssetsModal() {
@@ -49,7 +60,7 @@ export function AssetsModal() {
     const q = query.trim().toLowerCase();
     return assets.filter((asset) => {
       const used = Boolean(asset.usage?.references);
-      return (kind === 'all' || asset.kind === kind) && (usage === 'all' || (usage === 'used' ? used : !used)) && (!q || (asset.name ?? '').toLowerCase().includes(q));
+      return (kind === 'all' || asset.kind === kind) && (usage === 'all' || (usage === 'used' ? used : !used)) && (!q || assetTitle(asset).toLowerCase().includes(q) || (asset.name ?? '').toLowerCase().includes(q));
     });
   }, [assets, kind, query, usage]);
 
@@ -86,7 +97,7 @@ export function AssetsModal() {
             {visible.map((asset) => (
               <div key={asset.id} className="asset-card" role="button" tabIndex={0} onClick={() => { addAssets([asset]); toast(t('已添加到画布'), 'success'); }} onKeyDown={(e) => e.key === 'Enter' && (addAssets([asset]), toast(t('已添加到画布'), 'success'))} title={t('点击添加到画布')}>
                 <div className="asset-preview"><Preview asset={asset} /><span className="asset-kind">{kindLabel(asset.kind)}</span><span className="asset-add"><Plus /></span></div>
-                <div className="asset-meta"><strong>{asset.name || t('未命名资产')}</strong><small>{asset.width} × {asset.height}{asset.usage?.references ? ` · ${t('{n} 次引用', { n: asset.usage.references })}` : ''}</small>
+                <div className="asset-meta"><strong title={assetTitle(asset)}>{assetTitle(asset)}</strong><small>{asset.width} × {asset.height}{asset.usage?.references ? ` · ${t('{n} 次引用', { n: asset.usage.references })}` : ''}</small>
                   {asset.usage?.projects.length ? <div className="asset-source">{asset.usage.projects.slice(0, 2).map((project) => <button key={project.id} onClick={(e) => { e.stopPropagation(); void openProject(project.id); }}>{project.name}</button>)}{asset.usage.projects.length > 2 ? ` +${asset.usage.projects.length - 2}` : ''}</div> : <div className="asset-source muted">{t('尚未放入项目')}</div>}
                 </div>
               </div>

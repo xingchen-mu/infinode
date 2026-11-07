@@ -20,6 +20,8 @@ export interface AssetInfo {
 export interface AssetUsage {
   references: number;
   projects: { id: string; name: string }[];
+  /** Name of a board item showing it (from the most recently edited board), e.g. a shot the assistant named. */
+  name?: string;
 }
 
 export type ImageModel = 'zimage' | 'qwen';

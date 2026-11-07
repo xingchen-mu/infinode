@@ -75,7 +75,7 @@ export function addAssets(assets: AssetInfo[], at?: { x: number; y: number }, so
     y: Math.round(positions[i].y),
     ...sizes[i],
     asset,
-    name: asset.name,
+    name: asset.usage?.name ?? asset.name,
     inputs: source ? [source.id] : undefined,
     createdAt: now,
   }));

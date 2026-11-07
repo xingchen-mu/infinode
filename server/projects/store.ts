@@ -85,7 +85,11 @@ export class ProjectStore {
       const counts = new Map<string, number>();
       for (const item of project.items) {
         const assetId = item.asset?.id;
-        if (assetId && wanted.has(assetId)) counts.set(assetId, (counts.get(assetId) ?? 0) + 1);
+        if (!assetId || !wanted.has(assetId)) continue;
+        counts.set(assetId, (counts.get(assetId) ?? 0) + 1);
+        // Boards come newest first, so the name a node has on the latest board wins.
+        const name = item.name?.trim();
+        if (name && !out[assetId].name) out[assetId].name = name;
       }
       for (const [id, count] of counts) {
         out[id].references += count;
