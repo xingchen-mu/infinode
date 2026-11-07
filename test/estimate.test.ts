@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Task, TaskRequest } from '../shared/types.ts';
-import { imageEstimate, roughly, videoEstimate } from '../server/agent/estimate.ts';
+import { imageEstimate, roughly, speedNote, videoEstimate } from '../server/agent/estimate.ts';
 
 let clock = 0;
 /** A finished run that started after the previous one and took `seconds`. */
@@ -32,4 +32,13 @@ test('images take the median of similar finished runs', () => {
   assert.equal(imageEstimate([], qwen), 45);
   assert.equal(roughly(40), '约 40 秒');
   assert.equal(roughly(21 * 60), '约 21 分钟');
+});
+
+test('the speed line the assistant plans with comes from this server\'s runs', () => {
+  assert.equal(speedNote([]), '这台服务器的速度（还没有足够的实测数据，按参考显卡估算）：qwen 出一张 1k 图约 45 秒；MiniMax H3 一段 5 秒的视频，480p 约 3 分钟、720p 约 6 分钟，GPU 刚跑过别的模型时，第一段另加约 10 分钟加载模型。');
+  const sd = (seconds: number): TaskRequest => ({ op: 'video.generate', model: 'minimax', prompt: 'x', aspect: 'auto', quality: '480p', duration: seconds });
+  // Warm 480p clips at 31 s per second of video, then H3 still loaded: no load time to add.
+  const note = speedNote([run(qwen, 38), run(qwen, 42), run(sd(5), 700), run(sd(5), 150), run(sd(5), 160)]);
+  assert.match(note, /^这台服务器的速度（按以往任务实测）：qwen 出一张 1k 图约 40 秒；MiniMax H3 一段 5 秒的视频，480p 约 3 分钟、/);
+  assert.ok(!note.includes('加载模型'), note);
 });

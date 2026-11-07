@@ -6,6 +6,7 @@ import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage } from '../../
 import { ensureVisible, revealItems } from '../canvas/view';
 import { api } from '../lib/api';
 import { boundsOf, viewportCenter } from '../../shared/geometry';
+import { redoneVersion } from '../../shared/frames';
 import { savePending } from '../projects/sync';
 import { select, toast, useStore } from '../store';
 import { Markdown } from '../components/Markdown';
@@ -206,8 +207,15 @@ function Entry({ entry }: { entry: AgentEntry }) {
 }
 
 /** Work the agent holds until the user agrees, e.g. a batch of long video generations. */
-function Approval({ id, approval }: { id: string; approval: { title: string; detail: string } }) {
+function Approval({ id, approval }: { id: string; approval: NonNullable<Extract<AgentEntry, { kind: 'tool' }>['approval']> }) {
   const [busy, setBusy] = useState(false);
+  const items = useStore((s) => s.items);
+  // What will be submitted: a keyframe redone after the card was made replaces its old version.
+  const frames = approval.frames?.map((id) => {
+    const frame = items.find((i) => i.id === id);
+    return (frame && approval.since !== undefined ? redoneVersion(items, frame, approval.since, (i) => Boolean(i.asset))?.id : undefined) ?? id;
+  });
+  const redone = frames?.filter((f, i) => f !== approval.frames![i]).length ?? 0;
   const answer = async (ok: boolean) => {
     const { projectId } = useAgent.getState();
     if (!projectId) return;
@@ -223,6 +231,8 @@ function Approval({ id, approval }: { id: string; approval: { title: string; det
     <div className="agent-approval">
       <b>{approval.title}</b>
       <span>{approval.detail}</span>
+      {frames && <Chips ids={frames} />}
+      {redone > 0 && <span>{t('{n} 段的首帧用的是确认卡之后重做的版本', { n: redone })}</span>}
       <div className="agent-approval-bar">
         <button className="btn ghost small" disabled={busy} onClick={() => void answer(false)}>
           {t('不要')}

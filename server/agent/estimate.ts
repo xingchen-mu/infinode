@@ -55,3 +55,22 @@ export function imageEstimate(history: Task[], request: TaskRequest): number {
 export function roughly(seconds: number): string {
   return seconds >= 90 ? t('约 {n} 分钟', { n: Math.round(seconds / 60) }) : t('约 {n} 秒', { n: Math.max(5, Math.round(seconds / 5) * 5) });
 }
+
+/**
+ * This server's speeds in one line, for the model to plan with instead of guessing: it said "1.5–2.5
+ * hours" for ten clips from the prompt's old rule of thumb, while the approval card measured 35 minutes.
+ */
+export function speedNote(history: Task[]): string {
+  const image = imageEstimate(history, { op: 'image.generate', model: 'qwen', quality: '1k' } as TaskRequest);
+  const clip = (quality: '480p' | '720p') => {
+    const one = videoEstimate(history, quality, [5]);
+    const per = videoEstimate(history, quality, [5, 5]).seconds - one.seconds;
+    return { per, load: one.seconds - per, measured: one.measured };
+  };
+  const [sd, hd] = [clip('480p'), clip('720p')];
+  return (
+    `这台服务器的速度（${sd.measured ? '按以往任务实测' : '还没有足够的实测数据，按参考显卡估算'}）：qwen 出一张 1k 图${roughly(image)}；` +
+    `MiniMax H3 一段 5 秒的视频，480p ${roughly(sd.per)}、720p ${roughly(hd.per)}` +
+    (sd.load > 0 ? `，GPU 刚跑过别的模型时，第一段另加${roughly(sd.load)}加载模型。` : '。')
+  );
+}

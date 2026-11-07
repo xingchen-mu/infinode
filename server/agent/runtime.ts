@@ -26,6 +26,7 @@ import { serverLang, t } from '../i18n.ts';
 import type { SettingsStore } from '../settings.ts';
 import { RequestError } from '../workflows/index.ts';
 import { type CanvasDeps, ResultWriter, describeItem, readBoard } from './board.ts';
+import { speedNote } from './estimate.ts';
 import { SUMMARY_PROMPT, commercialRules, languageRule, systemPrompt } from './prompt.ts';
 import { type CanvasTool, type Json, type ToolContext, canvasTools } from './tools.ts';
 
@@ -92,7 +93,8 @@ interface Watch {
 interface ToolDetails {
   summary?: string;
   items?: string[];
-  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected'; payload: Json };
+  /** `replaced`: a newer card of the same tool took its place before the user answered. */
+  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected' | 'replaced'; payload: Json; frames?: string[]; since?: number };
 }
 
 const AGENT_APPROVAL = '__infinode_agent_approval';
@@ -686,6 +688,7 @@ export class AgentHub {
           args as Record<string, unknown>,
           this.context(s, { signal, progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: { summary: text } }) }),
         );
+        if (out.approval) this.replaceCards(s, def.name);
         return {
           content: [{ type: 'text', text: out.text }, ...(out.images ?? []).map((img): ImageContent => ({ type: 'image', ...img }))],
           details: {
@@ -696,6 +699,21 @@ export class AgentHub {
         };
       },
     };
+  }
+
+  /**
+   * A tool asked for approval again before the user answered its last card: that card goes, so the two
+   * cannot both be confirmed (e.g. the same videos queued twice after a keyframe was redone).
+   */
+  private replaceCards(s: Session, tool: string) {
+    for (const m of s.agent.state.messages) {
+      if (m.role !== 'toolResult' || m.toolName !== tool) continue;
+      const details = m.details as ToolDetails | undefined;
+      if (details?.approval?.state !== 'pending') continue;
+      details.approval.state = 'replaced';
+      details.summary = t('已被新的确认卡取代');
+      this.emit({ projectId: s.projectId, entry: this.resultEntry(m.toolCallId, m.toolName, m as ToolResultMessage, Date.now()) });
+    }
   }
 
   /** Board summary and the selected items, as the model sees them. */
@@ -710,6 +728,7 @@ export class AgentHub {
     } else {
       lines.push('用户没有选中节点。');
     }
+    lines.push(speedNote(this.deps.tasks.list()));
     return `<canvas_context selection="${selected.map((i) => i.id).join(',')}">\n${lines.join('\n')}\n</canvas_context>\n\n`;
   }
 
@@ -799,7 +818,10 @@ export class AgentHub {
     const base = { kind: 'tool' as const, id, tool, label: def ? t(def.label) : tool, at, ...(details.items?.length ? { items: details.items } : {}) };
     if (!result) return { ...base, status: running ? 'running' : 'error', summary: running ? (def?.describe(args as Record<string, unknown>) ?? '') : t('没有完成') };
     if (result.isError) return { ...base, status: 'error', summary: clip(textOf(result.content), 300) };
-    if (approval?.state === 'pending') return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title: approval.title, detail: approval.detail } };
+    if (approval?.state === 'pending') {
+      const { title, detail, frames, since } = approval;
+      return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title, detail, ...(frames ? { frames, since } : {}) } };
+    }
     return { ...base, status: approval?.state === 'rejected' ? 'error' : 'done', summary: details.summary ?? '' };
   }
 

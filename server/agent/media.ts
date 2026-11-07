@@ -75,25 +75,31 @@ export async function videoFrame(path: string, at: number): Promise<Buffer> {
   return exec('ffmpeg', ['-v', 'error', '-ss', String(Math.max(0, at)), '-i', path, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-']);
 }
 
+export interface Tile {
+  image: Buffer | string;
+  /** Drawn in the corner: "3", or "3a" for a frame of a video. */
+  label: string;
+}
+
 /**
- * Numbered thumbnails on one JPEG, so a model can review a whole batch in one image.
- * At most 4 per row and 1920 px wide, which vision models take without downscaling much.
+ * Labelled tiles on one JPEG, `cols` to a row across 1920 px, which vision models take without
+ * downscaling much. Two columns give tiles about 960 px wide: big enough to see a chair grown into a table.
  */
-export async function contactSheet(images: (Buffer | string)[]): Promise<Buffer> {
-  const cols = Math.min(4, images.length);
-  const rows = Math.ceil(images.length / cols);
-  const cellW = cols <= 2 ? 720 : 480;
-  // Cells take the median shape, so a mixed batch wastes the least space.
-  const ratios = (await Promise.all(images.map((img) => sharp(img).metadata()))).map((m) => (m.height ?? 9) / (m.width ?? 16)).sort((a, b) => a - b);
-  const cellH = Math.round(Math.min(1.4, Math.max(0.5, ratios[Math.floor(ratios.length / 2)])) * cellW);
+export async function contactSheet(tiles: Tile[], cols: number): Promise<Buffer> {
   const gap = 8;
-  const tiles = await Promise.all(
-    images.map(async (img, i) => {
+  cols = Math.max(1, Math.min(cols, tiles.length));
+  const rows = Math.ceil(tiles.length / cols);
+  const cellW = Math.min(1280, Math.floor((1920 - gap * (cols - 1)) / cols));
+  // Cells take the median shape, so a mixed batch wastes the least space.
+  const ratios = (await Promise.all(tiles.map((t) => sharp(t.image).metadata()))).map((m) => (m.height ?? 9) / (m.width ?? 16)).sort((a, b) => a - b);
+  const cellH = Math.round(Math.min(1.4, Math.max(0.5, ratios[Math.floor(ratios.length / 2)])) * cellW);
+  const placed = await Promise.all(
+    tiles.map(async (t, i) => {
       const label = Buffer.from(
-        `<svg width="${cellW}" height="${cellH}"><rect x="8" y="8" rx="8" width="${String(i + 1).length * 18 + 22}" height="40" fill="rgba(0,0,0,0.72)"/>` +
-          `<text x="19" y="37" font-size="28" font-weight="700" font-family="Helvetica, Arial, sans-serif" fill="#ffffff">${i + 1}</text></svg>`,
+        `<svg width="${cellW}" height="${cellH}"><rect x="8" y="8" rx="8" width="${t.label.length * 18 + 22}" height="40" fill="rgba(0,0,0,0.72)"/>` +
+          `<text x="19" y="37" font-size="28" font-weight="700" font-family="Helvetica, Arial, sans-serif" fill="#ffffff">${t.label}</text></svg>`,
       );
-      const tile = await sharp(img)
+      const tile = await sharp(t.image)
         .resize(cellW, cellH, { fit: 'contain', background: '#141518' })
         .composite([{ input: label }])
         .png()
@@ -102,7 +108,7 @@ export async function contactSheet(images: (Buffer | string)[]): Promise<Buffer>
     }),
   );
   return sharp({ create: { width: cols * cellW + (cols - 1) * gap, height: rows * cellH + (rows - 1) * gap, channels: 3, background: '#0e0f11' } })
-    .composite(tiles)
+    .composite(placed)
     .jpeg({ quality: 82 })
     .toBuffer();
 }

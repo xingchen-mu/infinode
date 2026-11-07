@@ -164,6 +164,52 @@ test('approved videos are queued, and after a restart the agent still carries on
   assert.equal(texts.at(-1), '视频好了，接着剪辑');
 });
 
+test('a video card shows its first frames, submits a keyframe redone after it, and gives way to a newer card', async () => {
+  const board = await projects.create('redo');
+  const asset = (id: string) => ({ id, url: `/files/${id}.png`, kind: 'image' as const, mime: 'image/png', width: 1376, height: 768 });
+  const old = { id: 'kf0000old1', kind: 'image' as const, x: 0, y: 0, w: 512, h: 288, createdAt: 1, name: 'S04', group: '关键帧', asset: asset('aold') };
+  await projects.patchItems(board.id, { upsert: [old] });
+  const tasks = fakeTasks();
+  // A new call (and call id) each time, as a model would make.
+  const videos = () => fauxAssistantMessage(fauxToolCall('batch_generate_videos', { jobs: [{ prompt: '他站起来', first_frame_id: old.id, name: 'S04' }] }));
+  let context = '';
+  const { hub } = await hubWith(tasks, [
+    (c) => {
+      context = JSON.stringify(c.messages);
+      return videos();
+    },
+    say('等你确认'),
+    videos(),
+    say('又提交了一次'),
+    videos(),
+    say('再提交一次'),
+  ]);
+  await hub.send(board.id, { text: '做成视频' });
+  const card = (await settled(hub, board.id)).entries.find((e) => e.kind === 'tool' && e.status === 'waiting');
+  assert.ok(card?.kind === 'tool' && card.approval?.frames?.[0] === old.id && card.approval.since, JSON.stringify(card));
+  assert.match(context, /这台服务器的速度/, 'the measured speeds reach the model');
+
+  // S04 is redone after the card was made, under the same name and group: confirming submits the new one.
+  await projects.patchItems(board.id, { upsert: [{ ...old, id: 'kf0000new1', createdAt: Date.now() + 1, asset: asset('anew') }] });
+  await hub.approve(board.id, card.id, true);
+  const submitted = tasks.created[0];
+  assert.deepEqual(submitted.op === 'video.generate' && submitted.images, ['anew']);
+  const done = (await hub.view(board.id)).entries.find((e) => e.id === card.id);
+  assert.ok(done?.kind === 'tool' && /重做后的首帧/.test(done.summary), JSON.stringify(done));
+
+  // Two more cards: the newer one replaces the older, which can no longer be confirmed.
+  await hub.send(board.id, { text: '再做一遍' });
+  await settled(hub, board.id);
+  await hub.send(board.id, { text: '还是再做一遍' });
+  const cards = (await settled(hub, board.id)).entries.filter((e) => e.kind === 'tool' && e.tool === 'batch_generate_videos').slice(1);
+  assert.deepEqual(
+    cards.map((e) => e.kind === 'tool' && [e.status, e.summary]),
+    [['done', '已被新的确认卡取代'], ['waiting', '等待确认']],
+  );
+  await assert.rejects(hub.approve(board.id, cards[0].id, true));
+  assert.equal(tasks.created.length, 1);
+});
+
 test('commercial-only mode makes image generation default to Z-Image', async () => {
   const board = await projects.create('commercial');
   const tasks = fakeTasks();

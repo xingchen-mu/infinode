@@ -3,6 +3,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { type CallToolResult, CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { type CanvasDeps, ResultWriter, describeItem, readBoard } from '../agent/board.ts';
+import { speedNote } from '../agent/estimate.ts';
 import { type CanvasTool, canvasTools } from '../agent/tools.ts';
 
 /** What the open page last reported: its board, the selection and the board point at the center of its view. */
@@ -23,7 +24,7 @@ const PRESENCE_TTL = 6 * 3600_000;
 const INSTRUCTIONS = `Infinode is an infinite canvas on the user's own ComfyUI. Board items are images, videos or text notes; links show which items a result was made from.
 - Start with get_context: the board the user has open and the items they selected ("this image", "these" mean those). Tools work on that board unless you pass board_id.
 - Generation is asynchronous: generate_* / batch_* / run_workflow return new item ids at once; use wait_for_items to get results (each wait is capped, call again if it times out).
-- One GPU runs everything in turn: an image takes about 30–60 s, a MiniMax H3 video 5–14 min per clip. Ask the user before queueing several videos.
+- One GPU runs everything in turn. get_context gives this server's measured speed for images and MiniMax H3 clips; plan with it rather than guessing. Ask the user before queueing several videos.
 - For a short drama or any film cut from several shots, read the short_drama guide with read_guide before starting and follow its steps; reread a section before each step. Its video section also gives the prompt format for a single first-frame video.
 - Before generating images with the qwen model, read the qwen_image guide once: without reference images it wants one long English paragraph describing the picture, with them an instruction that says what each image is for.
 - New items are placed and linked on the board automatically; the user watches the board update live.
@@ -111,6 +112,7 @@ export class CanvasMcp {
             `${live?.projectId === id ? '用户正在看' : '最近编辑'}的画布：「${board.name}」（board_id \`${id}\`），共 ${board.items.length} 个节点。`,
             selected.length ? `用户选中了 ${selected.length} 个节点：\n${selected.map((i) => `- ${describeItem(this.deps, i, 300)}`).join('\n')}` : '用户没有选中节点。',
             others.length ? `其它画布：${others.map((b) => `「${b.name}」\`${b.id}\``).join('，')}` : '',
+            speedNote(this.deps.tasks.list()),
           ]
             .filter(Boolean)
             .join('\n');

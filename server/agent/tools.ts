@@ -23,7 +23,8 @@ import {
 } from './board.ts';
 import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
 import { GUIDES } from './guides.ts';
-import { concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
+import { redoneVersion } from '../../shared/frames.ts';
+import { type Tile, concatClips, contactSheet, probe, soundSpans, videoFrame } from './media.ts';
 
 /** Per call: which board, and where the user was looking when they asked. */
 export interface ToolContext {
@@ -49,8 +50,11 @@ export interface ToolOutput {
   summary: string;
   /** Board items to show with the call. */
   items?: string[];
-  /** Hold the work until the user agrees in the panel; then `approve(payload)` runs it. */
-  approval?: { title: string; detail: string; payload: Json };
+  /**
+   * Hold the work until the user agrees in the panel; then `approve(payload)` runs it. `frames`: first
+   * frames the card shows; `since`: when it was made, so frames redone later replace them.
+   */
+  approval?: { title: string; detail: string; payload: Json; frames?: string[]; since?: number };
 }
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -91,6 +95,10 @@ const snapDuration = (s: number | undefined) => VIDEO_DURATIONS.reduce((best, d)
 const MAX_BATCH = 40;
 const MAX_LISTED = 300;
 const VIEWABLE = new Set(['image/png', 'image/jpeg', 'image/webp']);
+/** Videos review_items looks at in one call (three frames each). */
+const MAX_REVIEW_CLIPS = 8;
+
+const chunk = <T,>(xs: T[], size: number): T[][] => Array.from({ length: Math.ceil(xs.length / size) }, (_, i) => xs.slice(i * size, (i + 1) * size));
 
 /** Generation settings of an item, without the prompt and asset ids. */
 function settingsOf(req: TaskRequest | undefined): string {
@@ -148,10 +156,15 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       : t('zimage 不支持参考图，要用参考图请用 qwen');
 
   const launchVideos = async (payload: Json, ctx: ToolContext): Promise<ToolOutput> => {
-    const { quality, jobs } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[] };
+    const { quality, jobs, since } = payload as { quality: '480p' | '720p'; jobs: { prompt: string; frames: string[]; duration: number; name: string | null }[]; since?: number };
     const p = await readBoard(deps, ctx.projectId);
+    const redone: string[] = [];
     const batch: BatchJob[] = jobs.map((j) => {
-      const frames = findItems(p, j.frames);
+      const frames = findItems(p, j.frames).map((f) => {
+        const newer = since ? redoneVersion(p.items, f, since, (i) => stateOf(deps, i).done) : undefined;
+        if (newer) redone.push(`${f.name}：\`${f.id}\` → \`${newer.id}\``);
+        return newer ?? f;
+      });
       const media = inputMedia(deps, frames, 'image');
       const first = frames[0];
       return {
@@ -166,8 +179,15 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
     if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
     ctx.notify?.(host === 'panel' ? t('用户确认后提交的 {n} 段视频', { n: items.length }) : t('{n} 段视频', { n: items.length }), items);
     return {
-      text: `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}${ctx.notify ? '' : `\n${afterBatch}`}`,
-      summary: failed.length ? t('{n} 段已提交，{failed} 段失败：{error}', { n: items.length, failed: failed.length, error: failed[0].error }) : t('{n} 段已提交', { n: items.length }),
+      text:
+        `已提交 ${items.length} 段视频：${items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('，')}` +
+        (redone.length ? `\n确认卡之后重做过的首帧，用了重做后的版本：${redone.join('；')}` : '') +
+        (ctx.notify ? '' : `\n${afterBatch}`),
+      summary: failed.length
+        ? t('{n} 段已提交，{failed} 段失败：{error}', { n: items.length, failed: failed.length, error: failed[0].error })
+        : redone.length
+          ? t('{n} 段已提交，其中 {redone} 段用了重做后的首帧', { n: items.length, redone: redone.length })
+          : t('{n} 段已提交', { n: items.length }),
       items: items.map((i) => i.id),
     };
   };
@@ -317,7 +337,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       name: 'generate_video',
       label: msg('生成视频'),
       description:
-        '用 MiniMax H3 在画布上生成带音频的视频，提交后立刻返回新节点 id，不等结果。很慢：每段 10 分钟以上，GPU 一次只跑一个任务。' +
+        '用 MiniMax H3 在画布上生成带音频的视频，提交后立刻返回新节点 id，不等结果。很慢：一段要几分钟，具体按这台服务器的实测速度算（面板里写在 <canvas_context>，外部 agent 用 get_context 查），GPU 一次只跑一个任务。' +
         'minimax（默认）：image_ids 可传 0–2 张，第 1 张是首帧、第 2 张是尾帧，不传就是纯文生视频。' +
         'minimax-ref（多图参考）：image_ids 传 1–9 张参考图（人物、场景、道具、分镜），提示词里用 @图1、@图2 指代。' +
         '提示词写动作、镜头运动、对白和声音，不要只重复画面内容。',
@@ -645,8 +665,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       description:
         `一次提交多段图生视频（MiniMax H3，最多 ${MAX_BATCH} 段），每段从自己的首帧图开始，可选尾帧；视频放在首帧右边。` +
         (host === 'panel'
-          ? '这一步很耗 GPU，会先在面板上请用户确认：调用后告诉用户在等他确认，然后结束这一轮；用户确认后会自动提交，全部结束时你会收到通知。'
-          : `这一步很耗 GPU（每段 5–14 分钟，一块 GPU 排队跑），调用前先跟用户确认。提交后立刻返回；${afterBatch}`),
+          ? '这一步很耗 GPU，会先在面板上请用户确认：调用后告诉用户在等他确认，然后结束这一轮；用户确认后会自动提交，全部结束时你会收到通知。' +
+            '确认卡弹出后又重做了某个镜头的首帧时（name 和 group 跟原来一样），不用重新提交：用户确认时会自动换成重做后的版本。再调用一次会让之前没确认的卡作废。'
+          : `这一步很耗 GPU（一块 GPU 排队跑，get_context 里有实测速度，返回结果里有这一批的预计时间），调用前先跟用户确认。提交后立刻返回；${afterBatch}`),
       parameters: {
         type: 'object',
         properties: {
@@ -680,6 +701,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           return { prompt: j.prompt, frames: frames.map((f) => f.id), duration: snapDuration(j.duration), name: j.name ?? null };
         });
         const seconds = jobs.reduce((n, j) => n + j.duration, 0);
+        const since = Date.now();
         const estimate = videoEstimate(deps.tasks.list(), quality, jobs.map((j) => j.duration));
         const minutes = Math.max(1, Math.round(estimate.seconds / 60));
         if (host === 'mcp') {
@@ -697,7 +719,9 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
                 : '共 {seconds} 秒 · {quality} · 预计 GPU 约 {minutes} 分钟（按参考显卡的速度估算，期间其他生成任务要排队）',
               { seconds, quality, minutes },
             ),
-            payload: { quality, jobs },
+            payload: { quality, jobs, since },
+            frames: jobs.map((j) => j.frames[0]),
+            since,
           },
         };
       },
@@ -709,15 +733,19 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       readOnly: true,
       label: msg('审片'),
       vision: true,
-      description: '把最多 16 个图片或视频节点拼成一张带编号的拼图来检查（视频取第 1 秒的画面）。比 view_images 省，适合整批检查人物是否一致、有没有多余的人、背景对不对。',
+      description:
+        `把最多 16 个图片或视频节点拼成带编号的大图来检查：图片每 4 张拼一张，视频每段取开头、中间、结尾三帧（编号后面加 a、b、c），一次最多 ${MAX_REVIEW_CLIPS} 段视频。比一张张用 view_images 省。` +
+        '检查：人物是不是同一个人、有没有多出来的人、背景对不对；人和家具、道具接触的地方（坐的椅子、靠的桌子、手里拿的东西）有没有粘在一起或穿过去；视频还要看动作有没有做出来、人物有没有变形。',
       parameters: { type: 'object', properties: { ids: { ...ids('节点 id', 16), minItems: 1 } }, required: ['ids'] },
       describe: (a) => t('{n} 个', { n: a.ids?.length ?? 0 }),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const items = findItems(p, args.ids.slice(0, 16));
-        const frames: (Buffer | string)[] = [];
+        const stills: Tile[] = [];
+        const clips: Tile[][] = [];
         const lines: string[] = [];
         const skipped: string[] = [];
+        let n = 0;
         for (const item of items) {
           const state = stateOf(deps, item);
           const stored = state.done ? deps.assets.get(state.media.id) : undefined;
@@ -726,15 +754,30 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
             continue;
           }
           const path = deps.assets.path(stored);
-          frames.push(stored.kind === 'video' ? await videoFrame(path, 1) : path);
-          lines.push(`${frames.length} = ${describeItem(deps, item, 120)}`);
+          if (stored.kind === 'video') {
+            if (clips.length >= MAX_REVIEW_CLIPS) {
+              skipped.push(`\`${item.id}\` (一次最多看 ${MAX_REVIEW_CLIPS} 段视频)`);
+              continue;
+            }
+            const { duration } = await probe(path);
+            const at = [Math.min(0.3, duration / 4), duration / 2, Math.max(0, duration - 0.4)];
+            const label = String(++n);
+            clips.push(await Promise.all(at.map(async (s, k) => ({ image: await videoFrame(path, s), label: `${label}${'abc'[k]}` }))));
+            lines.push(`${label}a、${label}b、${label}c = 开头、中间、结尾：${describeItem(deps, item, 120)}`);
+          } else {
+            stills.push({ image: path, label: String(++n) });
+            lines.push(`${n} = ${describeItem(deps, item, 120)}`);
+          }
         }
-        if (!frames.length) throw new Error(t('没有可看的画面：{list}', { list: list(skipped) }));
-        const sheet = await contactSheet(frames);
+        if (!n) throw new Error(t('没有可看的画面：{list}', { list: list(skipped) }));
+        const sheets = await Promise.all([
+          ...chunk(stills, 4).map((c) => contactSheet(c, 2)),
+          ...chunk(clips, 2).map((c) => contactSheet(c.flat(), 3)),
+        ]);
         return {
-          text: `拼图里的编号：\n${lines.join('\n')}${skipped.length ? `\n跳过：${skipped.join('、')}` : ''}`,
-          images: [{ data: sheet.toString('base64'), mimeType: 'image/jpeg' }],
-          summary: t('{n} 个', { n: frames.length }),
+          text: `${sheets.length > 1 ? `共 ${sheets.length} 张拼图，图片在前、视频在后。` : ''}拼图里的编号：\n${lines.join('\n')}${skipped.length ? `\n跳过：${skipped.join('、')}` : ''}`,
+          images: sheets.map((sheet) => ({ data: sheet.toString('base64'), mimeType: 'image/jpeg' })),
+          summary: t('{n} 个', { n }),
           items: items.map((i) => i.id),
         };
       },

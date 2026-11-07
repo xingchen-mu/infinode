@@ -415,7 +415,8 @@ export type AgentEntry =
       label: string;
       /** `waiting`: held until the user approves it in the panel (`approval`). */
       status: 'running' | 'done' | 'error' | 'waiting';
-      approval?: { title: string; detail: string };
+      /** `frames`: first frames of the work held (video batches), shown on the card; `since`: when it was made. */
+      approval?: { title: string; detail: string; frames?: string[]; since?: number };
       /** One line on what the call is doing or did (or its error). */
       summary: string;
       /** Board items it made or looked at. */
