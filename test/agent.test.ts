@@ -10,9 +10,10 @@ process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'infinode-agent-test-'));
 const { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } = await import('@earendil-works/pi-ai');
 const { AssetStore } = await import('../server/assets/store.ts');
 const { ProjectStore } = await import('../server/projects/store.ts');
-const { AgentHub, compactThreshold } = await import('../server/agent/runtime.ts');
+const { AgentHub, clearOldToolUse, compactThreshold } = await import('../server/agent/runtime.ts');
 type Task = import('../shared/types.ts').Task;
 type TaskRequest = import('../shared/types.ts').TaskRequest;
+type AgentEventData = import('../shared/types.ts').AgentEventData;
 type AssistantMessage = ReturnType<typeof fauxAssistantMessage>;
 /** A scripted reply, or a function of what the model was sent. */
 type Step = Parameters<ReturnType<typeof fauxProvider>['setResponses']>[0][number];
@@ -52,7 +53,7 @@ const projects = new ProjectStore();
 const assets = new AssetStore();
 await Promise.all([projects.init(), assets.init()]);
 
-async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; commercial?: boolean; approvalMode?: 'always' } = {}) {
+async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; clearAt?: number; commercial?: boolean; approvalMode?: 'always' } = {}) {
   const faux = fauxProvider({ provider: 'faux', models: [{ id: 'faux-1', input: ['text', 'image'], contextWindow: 200_000 }] });
   faux.setResponses(responses);
   const models = createModels();
@@ -69,10 +70,12 @@ async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], o
   const settings = opts.approvalMode
     ? ({ agentConfig: () => ({ model: 'faux/faux-1', vision: true, thinking: 'low', approvalMode: opts.approvalMode }) } as ConstructorParameters<typeof AgentHub>[3])
     : undefined;
-  const hub = new AgentHub(deps, () => {}, { models, model: 'faux/faux-1', compactAt: opts.compactAt }, settings);
+  // What the panel was sent, rows that are not saved with the conversation included.
+  const emitted: AgentEventData[] = [];
+  const hub = new AgentHub(deps, (e) => emitted.push(e), { models, model: 'faux/faux-1', compactAt: opts.compactAt, clearAt: opts.clearAt }, settings);
   await hub.init();
   assert.equal(hub.status.ready, true, hub.status.reason ?? '');
-  return { hub, faux };
+  return { hub, faux, emitted };
 }
 
 async function settled(hub: InstanceType<typeof AgentHub>, projectId: string) {
@@ -342,6 +345,90 @@ test('condensing keeps what the user typed word for word, also through a second 
   assert.ok(!second.includes('<said>'), 'without the words carried in it');
   const texts = (await hub.view(board.id)).entries.map((e) => (e.kind === 'tool' ? e.label : e.text));
   assert.equal(texts.at(-1), '回答 9');
+});
+
+type AgentMessage = Parameters<typeof clearOldToolUse>[0][number];
+
+test('clearing old tool use takes results and long arguments of all but the latest calls, never errors, and only once', () => {
+  const long = '镜'.repeat(2000);
+  const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: 'toolCall', id, name, arguments: args });
+  const result = (id: string, name: string, text: string, isError = false) => ({ role: 'toolResult', toolCallId: id, toolName: name, content: [{ type: 'text', text }], isError, timestamp: 2 });
+  const before = [
+    { role: 'user', content: '写分镜表', timestamp: 1 },
+    { role: 'assistant', content: [call('c1', 'write_note', { title: '分镜表', content: long }), call('c2', 'read_board', {})], timestamp: 2 },
+    result('c1', 'write_note', '已新建文本节点'),
+    result('c2', 'read_board', long),
+    { role: 'assistant', content: [call('c3', 'read_board', { ids: ['a'] })], timestamp: 3 },
+    result('c3', 'read_board', long, true),
+    { role: 'assistant', content: [call('c4', 'batch_generate_images', { jobs: [{ prompt: long }] })], timestamp: 4 },
+    result('c4', 'batch_generate_images', long),
+  ] as unknown as AgentMessage[];
+  const copy = JSON.stringify(before);
+  const { messages, freed, cleared } = clearOldToolUse(before, 1);
+  const json = JSON.stringify(messages);
+  assert.equal(cleared, 2, 'the note text in c1, the board read in c2');
+  assert.ok(freed > 3900 && freed < 4000, String(freed));
+  assert.match(json, /\[已清掉 2000 字，原文在画布上\]/);
+  assert.match(json, /\[已清掉较早的 read_board 结果，2000 字，需要时重新调用\]/);
+  assert.match(json, /"title":"分镜表"/, 'short arguments stay');
+  assert.equal((messages[5] as { content: { text: string }[] }).content[0].text, long, 'an error stays: the panel shows it');
+  assert.equal(JSON.stringify(messages.slice(6)), JSON.stringify(before.slice(6)), 'the latest call stays whole');
+  assert.equal(JSON.stringify(before), copy, 'the messages given are not changed');
+  assert.equal(clearOldToolUse(messages, 1).freed, 0, 'nothing more the second time');
+});
+
+test('past the clearing mark, old tool results are cleared before the next request, without a summary', async () => {
+  const board = await projects.create('clearing');
+  const reads = Array.from({ length: 8 }, (_, i) => fauxToolCall('read_guide', { name: 'short_drama' }, { id: `read${i}` }));
+  let second = '';
+  const { hub, emitted } = await hubWith(
+    fakeTasks(),
+    [
+      fauxAssistantMessage(reads),
+      say('读完了'),
+      (context) => {
+        second = JSON.stringify(context.messages);
+        return say('接着写');
+      },
+    ],
+    { clearAt: 100, compactAt: 10_000_000 },
+  );
+  await hub.send(board.id, { text: '读一下手册' });
+  await settled(hub, board.id);
+  await hub.send(board.id, { text: '继续' });
+  await settled(hub, board.id);
+  const events = emitted.flatMap((e) => (e.entry?.kind === 'event' ? [e.entry.text] : []));
+  assert.equal(events.length, 1, events.join(' | '));
+  assert.match(events[0], /^已清掉 2 处较早的工具结果，上下文少了 \d+ 字$/);
+  assert.equal((second.match(/\[已清掉较早的 read_guide 结果/g) ?? []).length, 2, 'the two oldest of eight, the latest six stay');
+  assert.ok(!second.includes('<canvas_summary>'));
+});
+
+test('condensing on request keeps what the user asked for, shows the summary in the panel, and says when there is nothing to condense', async () => {
+  const board = await projects.create('condense');
+  let asked = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    say('好的，主角叫林晚'),
+    say('分镜表写好了'),
+    say('关键帧在出'),
+    (context) => {
+      asked = JSON.stringify(context.messages);
+      return say('## 目标和要求\n- 做一部短剧\n## 定下来的事\n- 主角叫林晚');
+    },
+  ]);
+  for (const text of ['主角叫林晚', '写分镜表', '出关键帧']) {
+    await hub.send(board.id, { text });
+    await settled(hub, board.id);
+  }
+  await hub.condense(board.id, '人物设定');
+  assert.match(asked, /用户希望这次整理特别保留：人物设定/);
+  const view = await hub.view(board.id);
+  assert.equal(view.running, false);
+  const summary = view.entries.find((e) => e.kind === 'event' && e.detail);
+  assert.ok(summary?.kind === 'event' && /^## 目标和要求/.test(summary.detail!), JSON.stringify(summary));
+  const texts = view.entries.map((e) => (e.kind === 'event' ? 'event' : e.kind === 'tool' ? e.label : e.text));
+  assert.deepEqual(texts.slice(-3), ['event', '出关键帧', '关键帧在出'], 'the last message and its reply stay word for word');
+  await assert.rejects(hub.condense(board.id), /对话还很短/);
 });
 
 test('an OpenAI-compatible endpoint takes its context length and reasoning from the settings', () => {

@@ -3326,6 +3326,67 @@ body.agent-open .panel {
   color: var(--warn);
 }
 
+/* A condensed conversation: one line, the summary unfolds below it. */
+.agent-event.agent-summary {
+  display: block;
+  border-top: 1px dashed var(--border-2);
+  border-bottom: 1px dashed var(--border-2);
+  padding: 6px 4px;
+}
+
+.agent-summary summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-summary summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-summary summary:hover {
+  color: var(--text);
+}
+
+.agent-summary[open] summary {
+  margin-bottom: 6px;
+}
+
+.agent-summary .agent-text {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.agent-condense {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding: 8px 12px 0;
+}
+
+.agent-condense input {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
+.agent-condense input:focus {
+  border-color: var(--border-2);
+}
+
+.agent-condense + .agent-input {
+  border-top: none;
+}
+
 .agent-tool.waiting {
   border-color: #5a4a2a;
 }

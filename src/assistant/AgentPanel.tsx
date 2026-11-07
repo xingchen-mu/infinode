@@ -1,4 +1,4 @@
-import { ArrowUp, Bell, CircleAlert, CircleCheck, Hourglass, Loader2, Sparkles, Square, SquarePen, StickyNote, X } from 'lucide-react';
+import { ArrowUp, Bell, CircleAlert, CircleCheck, FoldVertical, Hourglass, Loader2, Sparkles, Square, SquarePen, StickyNote, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { thumbUrl } from '../../shared/media';
@@ -174,6 +174,16 @@ function Entry({ entry }: { entry: AgentEntry }) {
       </div>
     );
   }
+  if (entry.kind === 'event' && entry.detail) {
+    return (
+      <details className="agent-event agent-summary">
+        <summary>
+          <FoldVertical /> <span>{entry.text}</span>
+        </summary>
+        <Markdown text={entry.detail} className="agent-text" />
+      </details>
+    );
+  }
   if (entry.kind === 'event') {
     return (
       <div className="agent-event">
@@ -274,10 +284,25 @@ export function AgentPanel() {
   const selected = useStore((s) => s.selection.length);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  /** The "condense now" bar: what to keep in particular, and whether it is running. */
+  const [condense, setCondense] = useState<{ focus: string; busy: boolean } | null>(null);
 
   useEffect(() => {
     if (open && projectId) void refreshAgent();
   }, [open, projectId]);
+
+  const runCondense = async () => {
+    if (!projectId || !condense || condense.busy) return;
+    setCondense({ ...condense, busy: true });
+    try {
+      await api.condenseAgent(projectId, condense.focus);
+      await refreshAgent();
+      setCondense(null);
+    } catch (err) {
+      toast((err as Error).message, 'error');
+      setCondense((c) => (c ? { ...c, busy: false } : c));
+    }
+  };
 
   // Follow the conversation unless the user scrolled up to read.
   useLayoutEffect(() => {
@@ -309,6 +334,14 @@ export function AgentPanel() {
             {usageText(usage)}
           </span>
         )}
+        <button
+          className="icon-btn small"
+          title={t('整理对话：把较早的部分整理成摘要，后面每次请求都更省')}
+          onClick={() => setCondense({ focus: '', busy: false })}
+          disabled={!ready || running || entries.length < 4 || condense !== null}
+        >
+          <FoldVertical />
+        </button>
         <button className="icon-btn small" title={t('新对话')} onClick={() => void clear()} disabled={!entries.length}>
           <SquarePen />
         </button>
@@ -350,6 +383,29 @@ export function AgentPanel() {
       {status && !ready && (
         <div className="agent-setup">
           <CircleAlert /> {status.reason}
+        </div>
+      )}
+
+      {condense && (
+        <div className="agent-condense">
+          <input
+            autoFocus
+            value={condense.focus}
+            disabled={condense.busy}
+            maxLength={500}
+            placeholder={t('整理较早的对话：重点保留什么（可以不填）')}
+            onChange={(e) => setCondense({ ...condense, focus: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void runCondense();
+              else if (e.key === 'Escape' && !condense.busy) setCondense(null);
+            }}
+          />
+          <button className="btn ghost small" disabled={condense.busy} onClick={() => setCondense(null)}>
+            {t('取消')}
+          </button>
+          <button className="btn primary small" disabled={condense.busy} onClick={() => void runCondense()}>
+            {condense.busy && <Loader2 className="spin" />} {t('整理')}
+          </button>
         </div>
       )}
 

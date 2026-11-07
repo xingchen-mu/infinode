@@ -1,9 +1,26 @@
 import type { Lang } from '../../shared/i18n.ts';
 
-/** Instructions for condensing the early part of a long conversation. */
-export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考（原文会被删掉，只留你的整理；用户自己打的字会另外原样附在后面，不用逐字抄）。
-保留：用户的目标和要求、确认过的决定和偏好、画布上重要节点的 id 和它们是什么（剧本、分镜表、设定图、关键帧、视频、成片等）、还没做完的事和下一步。
-不要编造，不要写客套话。用中文，条目式，不超过 800 字。`;
+/**
+ * Instructions for condensing the early part of a long conversation: fixed sections, as coding agents'
+ * compaction prompts use, so nothing the work depends on is left to chance. The user also sees it in the panel.
+ */
+export const SUMMARY_PROMPT = `你在整理画布助手和用户的一段较早的对话，供助手接下来继续工作时参考。原文会被删掉，只留你的整理；用户自己打的字会另外原样附在后面，不用逐字抄。
+
+照下面的栏目写，栏目名原样保留，每栏用条目；某一栏没有内容就写「无」：
+
+## 目标和要求
+用户要做什么，有哪些具体要求（画风、比例、时长、人物、风格参考等）。
+## 定下来的事
+确认过的决定、设定和偏好；用户否掉的方案也写上，连同原因。
+## 画布上的重要节点
+节点 id、名称、是什么（剧本、分镜表、设定图、关键帧、视频、成片……）、现在的状态（完成、在生成、失败、要重做）。
+## 做到哪一步了
+## 遇到的问题和解决办法
+出过的错、效果不好的地方，以及后来怎么处理的。
+## 下一步
+还没做完的事，按顺序。
+
+不要编造，不要写客套话，不写调用工具的过程。用对话里的语言写，不超过 1200 字。如果开头写了「用户希望这次整理特别保留」，那部分写得详细些。`;
 
 /** Rules while the user only allows commercially licensed models (also sent when they switch it on or off). */
 export function commercialRules(on: boolean): string {

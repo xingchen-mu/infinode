@@ -407,7 +407,8 @@ export type AgentEntry =
     }
   | { kind: 'assistant'; id: string; text: string; error?: string; at: number }
   /** Something that happened on its own, e.g. a batch of tasks finished and woke the agent. */
-  | { kind: 'event'; id: string; text: string; at: number }
+  /** `detail`: more to read when unfolded (the summary of a condensed conversation). */
+  | { kind: 'event'; id: string; text: string; detail?: string; at: number }
   | {
       kind: 'tool';
       id: string;

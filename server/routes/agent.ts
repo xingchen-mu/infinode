@@ -25,6 +25,11 @@ export function registerAgentRoutes(app: Hono, { agent }: Pick<Services, 'agent'
     await agent.abort(c.req.param('projectId'));
     return c.json({ ok: true });
   });
+  app.post('/api/agent/:projectId/condense', async (c) => {
+    const body = await c.req.json<{ focus?: unknown }>().catch(() => ({}) as { focus?: unknown });
+    await agent.condense(c.req.param('projectId'), typeof body.focus === 'string' ? body.focus : undefined);
+    return c.json({ ok: true });
+  });
   app.post('/api/agent/:projectId/approve', async (c) => {
     const body = await c.req.json<{ id?: unknown; ok?: unknown }>();
     if (typeof body.id !== 'string') throw new RequestError(t('请求格式错误'));

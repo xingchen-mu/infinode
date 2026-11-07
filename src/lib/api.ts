@@ -147,6 +147,8 @@ export const api = {
     request<{ ok: true }>(`/api/agent/${projectId}`, json('POST', body)),
   abortAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}/abort`, { method: 'POST' }),
   clearAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}`, { method: 'DELETE' }),
+  /** Condenses the conversation before the last message now; `focus`: what to keep in particular. */
+  condenseAgent: (projectId: string, focus: string) => request<{ ok: true }>(`/api/agent/${projectId}/condense`, json('POST', { focus })),
   /** What this page shows, for outside agents (MCP) to act on "the selected items". */
   presence: (body: { projectId: string; selection: string[]; view: { x: number; y: number } }) =>
     request<{ ok: true }>('/api/presence', json('PUT', body)),

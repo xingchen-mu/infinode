@@ -534,6 +534,16 @@ export const EN: Record<string, Translation> = {
   '自动继续的次数到上限了，先停在这里；说一句「继续」让助手接着做': 'Reached the limit of automatic steps, so it stops here. Say "continue" to carry on',
   '对话比较长了，正在把较早的部分整理成摘要…': 'The conversation is long; condensing the earlier part into a summary…',
   '整理摘要没成功，先保持原样': 'Could not condense the conversation; leaving it as is',
+  '正在把较早的对话整理成摘要…': 'Condensing the earlier conversation into a summary…',
+  '已清掉 {n} 处较早的工具结果，上下文少了 {chars} 字': [
+    'Cleared {n} earlier tool result, {chars} characters less context',
+    'Cleared {n} earlier tool results, {chars} characters less context',
+  ],
+  '助手正在工作，等它停下来再整理': 'The assistant is working; condense once it stops',
+  '对话还很短，没有可以整理的较早部分': 'The conversation is still short; there is nothing earlier to condense',
+  '整理对话：把较早的部分整理成摘要，后面每次请求都更省': 'Condense: sum up the earlier conversation, so every request after costs less',
+  '整理较早的对话：重点保留什么（可以不填）': 'Condense the earlier conversation: anything to keep in particular? (optional)',
+  整理: 'Condense',
   没有完成: 'Did not finish',
   'zimage 不支持参考图；用户开启了「只用可商用的模型」，Qwen-Image 2.1 也不能用。改图请用 list_workflows 里可商用的模板（如 Qwen-Image-Edit 2511），通过 run_workflow 运行':
     'zimage takes no reference images, and with "Commercial-use models only" on, Qwen-Image 2.1 is off too. To edit images, run a commercial-use template from list_workflows (such as Qwen-Image-Edit 2511) with run_workflow',

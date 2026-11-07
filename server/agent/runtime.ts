@@ -49,6 +49,14 @@ const WORD_CHARS = 1500;
 const WORDS_BUDGET = 6000;
 const SAID = /<said>([\s\S]*?)<\/said>/g;
 const WORDS_HEAD = /\n*用户说过的原话（[^\n]*：\s*$/;
+/** The latest tool calls keep their results and arguments when old ones are cleared. */
+const KEEP_RESULTS = 6;
+/** Tool results and arguments shorter than this stay: little to gain. */
+const CLEAR_MIN_CHARS = 600;
+/** Clearing rebuilds the cache from the first message it changes: only done when it frees this much text. */
+const CLEAR_WORTH = 12_000;
+/** Starts what clearing leaves in place of a result or an argument. */
+const CLEARED = '[已清掉';
 /** Context length assumed for an OpenAI-compatible endpoint that does not say. */
 const CUSTOM_CONTEXT = 128_000;
 /** Runs started by finished tasks in a row, before it waits for the user. */
@@ -255,11 +263,64 @@ function summaryMessage(summary: string, words: string[]): string {
   return `<canvas_summary>\n${summary}${quoted}\n</canvas_summary>`;
 }
 
+/** Long strings anywhere in a tool call's arguments, replaced by their length. */
+function clearArgs(value: unknown): { value: unknown; freed: number } {
+  if (typeof value === 'string') {
+    if (value.length <= CLEAR_MIN_CHARS || value.startsWith(CLEARED)) return { value, freed: 0 };
+    const line = `${CLEARED} ${value.length} 字，原文在画布上]`;
+    return { value: line, freed: value.length - line.length };
+  }
+  if (!value || typeof value !== 'object') return { value, freed: 0 };
+  let freed = 0;
+  const each = (v: unknown) => {
+    const r = clearArgs(v);
+    freed += r.freed;
+    return r.value;
+  };
+  const out = Array.isArray(value) ? value.map(each) : Object.fromEntries(Object.entries(value).map(([k, v]) => [k, each(v)]));
+  return { value: out, freed };
+}
+
+/**
+ * Old tool results and long tool arguments, each replaced by a line saying what was there (what Anthropic
+ * calls context editing): the board can be read again, and notes and prompts are on it. The last `keep`
+ * calls stay whole, and so do errors, which the panel shows. `cleared`: places changed; `freed`: characters.
+ */
+export function clearOldToolUse(messages: AgentMessage[], keep = KEEP_RESULTS): { messages: AgentMessage[]; freed: number; cleared: number } {
+  const calls = messages.flatMap((m) => (m.role === 'assistant' ? m.content.flatMap((c) => (c.type === 'toolCall' ? [c.id] : [])) : []));
+  const kept = new Set(keep > 0 ? calls.slice(-keep) : []);
+  let freed = 0;
+  let cleared = 0;
+  const out = messages.map((m): AgentMessage => {
+    if (m.role === 'toolResult') {
+      const text = textOf(m.content);
+      if (kept.has(m.toolCallId) || m.isError || text.length <= CLEAR_MIN_CHARS || text.startsWith(CLEARED)) return m;
+      const line = `${CLEARED}较早的 ${m.toolName} 结果，${text.length} 字，需要时重新调用]`;
+      freed += text.length - line.length;
+      cleared++;
+      return { ...m, content: [{ type: 'text', text: line }] };
+    }
+    if (m.role !== 'assistant') return m;
+    let changed = false;
+    const content = m.content.map((c) => {
+      if (c.type !== 'toolCall' || kept.has(c.id)) return c;
+      const r = clearArgs(c.arguments);
+      if (!r.freed) return c;
+      freed += r.freed;
+      cleared++;
+      changed = true;
+      return { ...c, arguments: r.value as typeof c.arguments };
+    });
+    return changed ? { ...m, content } : m;
+  });
+  return { messages: out, freed, cleared };
+}
+
 function userEntry(m: UserMessage): AgentEntry {
   const raw = textOf(m.content);
   const event = EVENT.exec(raw.trim());
   if (event) return { kind: 'event', id: `u${m.timestamp}`, text: event[1].trim().split('\n')[0], at: m.timestamp };
-  if (SUMMARY.test(raw.trim())) return { kind: 'event', id: `u${m.timestamp}`, text: t('较早的对话已整理成摘要，助手按摘要继续'), at: m.timestamp };
+  if (SUMMARY.test(raw.trim())) return { kind: 'event', id: `u${m.timestamp}`, text: t('较早的对话已整理成摘要，助手按摘要继续'), detail: summaryText(raw.trim()), at: m.timestamp };
   const selection = CONTEXT.exec(raw)?.[1]?.split(',').filter(Boolean) ?? [];
   return { kind: 'user', id: `u${m.timestamp}`, text: raw.replace(CONTEXT, ''), ...(selection.length ? { selection } : {}), at: m.timestamp };
 }
@@ -291,6 +352,7 @@ export class AgentHub {
   private readonly watchFile: string;
   /** Context size (tokens of the last request) at which the early conversation is condensed. */
   private compactAt = COMPACT_AT;
+  private clearAt = Math.floor(COMPACT_AT / 2);
   private models: Models;
   private model?: Model<Api>;
   private thinking!: ThinkingLevel;
@@ -298,14 +360,14 @@ export class AgentHub {
   private approvalMode: 'risky' | 'always' = 'risky';
   private readonly tools: CanvasTool[];
   private readonly labels: Map<string, CanvasTool>;
-  private readonly opts: { models?: Models; model?: string; compactAt?: number };
+  private readonly opts: { models?: Models; model?: string; compactAt?: number; clearAt?: number };
   private readonly settings?: SettingsStore;
 
   constructor(
     private readonly deps: CanvasDeps,
     private readonly emit: (e: AgentEventData) => void,
-    /** For tests: another model collection and "provider/model", and when to condense. */
-    opts: { models?: Models; model?: string; compactAt?: number } = {},
+    /** For tests: another model collection and "provider/model", and when to clear old tool use and condense. */
+    opts: { models?: Models; model?: string; compactAt?: number; clearAt?: number } = {},
     settings?: SettingsStore,
   ) {
     this.opts = opts;
@@ -341,6 +403,8 @@ export class AgentHub {
     this.model = slash > 0 ? this.models.getModel(name.slice(0, slash), name.slice(slash + 1)) : undefined;
     this.vision = Boolean(this.model?.input.includes('image'));
     this.compactAt = this.opts.compactAt ?? compactThreshold(this.model?.contextWindow);
+    // Halfway there: clearing keeps most conversations from ever needing a summary.
+    this.clearAt = this.opts.clearAt ?? Math.floor(this.compactAt / 2);
     this.approvalMode = cfg.approvalMode;
     const wanted = cfg.thinking as ThinkingLevel;
     this.thinking = !this.model?.reasoning ? 'off' : (clampThinkingLevel(this.model, THINKING.has(wanted) ? wanted : 'low') as ThinkingLevel);
@@ -424,7 +488,7 @@ export class AgentHub {
     this.syncPolicy(s);
     s.running = true;
     this.emit({ projectId, running: true });
-    s.done = this.run(s, message);
+    s.done = this.run(s, [message]);
   }
 
   /** Tells the model when the commercial-only switch or the interface language changed since it was last told (only between runs). */
@@ -676,7 +740,7 @@ export class AgentHub {
     this.syncPolicy(s);
     s.running = true;
     this.emit({ projectId: s.projectId, running: true });
-    s.done = this.run(s, message);
+    s.done = this.run(s, [message]);
   }
 
   /** A line in the panel only (not sent to the model). */
@@ -755,10 +819,10 @@ export class AgentHub {
     return `<canvas_context selection="${selected.map((i) => i.id).join(',')}">\n${lines.join('\n')}\n</canvas_context>\n\n`;
   }
 
-  private async run(s: Session, first: UserMessage) {
+  private async run(s: Session, first: AgentMessage[]) {
     try {
-      await this.compactIfLong(s);
-      let next: AgentMessage[] = [first];
+      await this.manageContext(s);
+      let next: AgentMessage[] = first;
       while (next.length) {
         await s.agent.prompt(next);
         // Messages that arrived as the last turn was ending start the next run.
@@ -776,26 +840,48 @@ export class AgentHub {
   }
 
   /**
-   * Long conversations cost more on every request: once the last request's context passed `compactAt`,
-   * everything before the last few user turns is condensed by the model into a summary, with what the user
-   * typed carried along word for word. The panel keeps the old rows.
+   * Long conversations cost more on every request. Measured by the last request's context: past `clearAt`,
+   * old tool results and long tool arguments go first (no model call, and they can be read again); past
+   * `compactAt`, the early conversation is condensed into a summary. Either one makes the next request
+   * rebuild the cache, so each happens rarely and in one go.
    */
-  private async compactIfLong(s: Session) {
-    const messages = s.agent.state.messages;
-    const last = messages.findLast((m) => m.role === 'assistant') as AssistantMessage | undefined;
+  private async manageContext(s: Session) {
+    const last = s.agent.state.messages.findLast((m) => m.role === 'assistant') as AssistantMessage | undefined;
     const u = last?.usage;
-    if (!this.model || !u || u.input + u.cacheRead + u.cacheWrite + u.output < this.compactAt) return;
+    if (!this.model || !u) return;
+    const size = u.input + u.cacheRead + u.cacheWrite + u.output;
+    if (size >= this.compactAt) await this.compact(s, KEEP_TURNS);
+    else if (size >= this.clearAt) await this.clearOld(s);
+  }
+
+  /** Clears old tool use when that frees enough to be worth a cache rebuild. */
+  private async clearOld(s: Session) {
+    const { messages, freed, cleared } = clearOldToolUse(s.agent.state.messages);
+    if (freed < CLEAR_WORTH) return;
+    s.agent.state.messages = messages;
+    this.event(s, t('已清掉 {n} 处较早的工具结果，上下文少了 {chars} 字', { n: cleared, chars: freed }));
+    await this.save(s);
+  }
+
+  /**
+   * Condenses everything before the last `keep` user turns into a summary, with what the user typed carried
+   * along word for word; `focus`: what the user asked to keep in particular. The panel keeps the old rows.
+   * `short`: too little to condense yet.
+   */
+  private async compact(s: Session, keep: number, focus?: string): Promise<'done' | 'short' | 'failed'> {
+    const messages = s.agent.state.messages;
     const turns = messages.flatMap((m, i) => (m.role === 'user' ? [i] : []));
-    if (turns.length <= KEEP_TURNS) return;
-    const cut = turns[turns.length - KEEP_TURNS];
+    if (!this.model || turns.length <= keep) return 'short';
+    const cut = turns[turns.length - keep];
     const early = messages.slice(0, cut);
     const old = early.filter((m) => m.role !== 'system');
-    if (old.length < 4) return;
-    this.event(s, t('对话比较长了，正在把较早的部分整理成摘要…'));
+    if (old.length < 4) return 'short';
+    this.event(s, focus === undefined ? t('对话比较长了，正在把较早的部分整理成摘要…') : t('正在把较早的对话整理成摘要…'));
+    // In characters: Chinese runs about a token each, so this fits even a small window.
+    const transcript = transcriptText(old, Math.min(120_000, Math.floor((this.model.contextWindow || Infinity) * 0.6)));
     const reply = await this.models.completeSimple(this.model, {
       systemPrompt: SUMMARY_PROMPT,
-      // In characters: Chinese runs about a token each, so this fits even a small window.
-      messages: [{ role: 'user', content: transcriptText(old, Math.min(120_000, Math.floor((this.model.contextWindow || Infinity) * 0.6))), timestamp: Date.now() }],
+      messages: [{ role: 'user', content: focus ? `用户希望这次整理特别保留：${focus}\n\n${transcript}` : transcript, timestamp: Date.now() }],
     });
     const summary = reply.content
       .map((c) => (c.type === 'text' ? c.text : ''))
@@ -804,15 +890,41 @@ export class AgentHub {
     this.addUsage(s, reply);
     if (reply.stopReason === 'error' || !summary) {
       this.event(s, t('整理摘要没成功，先保持原样'));
-      return;
+      return 'failed';
     }
+    const condensed: UserMessage = { role: 'user', content: summaryMessage(summary, userWords(old)), timestamp: Date.now() };
     s.archived = [...s.archived, ...this.entriesOf(old, s)];
-    s.agent.state.messages = [
-      ...early.filter((m) => m.role === 'system'),
-      { role: 'user', content: summaryMessage(summary, userWords(old)), timestamp: Date.now() },
-      ...messages.slice(cut),
-    ];
+    s.agent.state.messages = [...early.filter((m) => m.role === 'system'), condensed, ...messages.slice(cut)];
+    this.emit({ projectId: s.projectId, entry: userEntry(condensed) });
     await this.save(s);
+    return 'done';
+  }
+
+  /**
+   * The user asked to condense now: everything before their last message, keeping `focus` in particular.
+   * Messages sent meanwhile wait, then start a run.
+   */
+  async condense(projectId: string, focus?: string) {
+    const s = await this.session(projectId);
+    if (!this.state.ready) throw new RequestError(this.status.reason ?? t('画布助手还没有配置好'));
+    if (s.running) throw new RequestError(t('助手正在工作，等它停下来再整理'));
+    s.running = true;
+    this.emit({ projectId, running: true });
+    let result: 'done' | 'short' | 'failed' = 'failed';
+    try {
+      result = await this.compact(s, 1, focus?.trim().slice(0, 500) ?? '');
+    } finally {
+      const queued = s.agent.peekQueuedMessages();
+      s.agent.clearAllQueues();
+      if (queued.length) {
+        s.done = this.run(s, queued);
+      } else {
+        s.running = false;
+        this.emit({ projectId, running: false, usage: s.usage });
+      }
+    }
+    if (result === 'short') throw new RequestError(t('对话还很短，没有可以整理的较早部分'));
+    if (result === 'failed') throw new RequestError(t('整理摘要没成功，先保持原样'));
   }
 
   private addUsage(s: Session, m: AssistantMessage) {
