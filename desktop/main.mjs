@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,12 @@ async function startBackend() {
   const port = await freePort();
   const appPath = app.isPackaged ? app.getAppPath() : sourceRoot;
   const dataDir = path.join(app.getPath('userData'), 'data');
-  const envFile = path.join(app.getPath('userData'), '.env');
+  // The app's own .env in its data folder. Run from source without one, the project's .env (keys like
+  // DEEPSEEK_API_KEY), so the key does not depend on the terminal exporting it. Values set here win:
+  // the server's loadEnvFile does not override variables that already exist.
+  const ownEnv = path.join(app.getPath('userData'), '.env');
+  const projectEnv = path.join(sourceRoot, '.env');
+  const envFile = !app.isPackaged && !existsSync(ownEnv) && existsSync(projectEnv) ? projectEnv : ownEnv;
   const runner = runtimePath('node_modules', 'tsx', 'dist', 'cli.mjs');
   const entry = path.join(appPath, 'server', 'index.ts');
   const env = {
@@ -155,6 +161,21 @@ if (!gotLock) {
           { role: 'about' },
           { type: 'separator' },
           { role: 'quit' },
+        ],
+      },
+      // On macOS ⌘C/⌘V/⌘X/⌘A/⌘Z reach text fields only through these menu items: without them nothing
+      // can be pasted into a note or the assistant's input. The page sees the keys first, so the canvas's
+      // own ⌘Z/⌘A (which call preventDefault) still win when no text field is focused.
+      {
+        label: '编辑',
+        submenu: [
+          { role: 'undo', label: '撤销' },
+          { role: 'redo', label: '重做' },
+          { type: 'separator' },
+          { role: 'cut', label: '剪切' },
+          { role: 'copy', label: '拷贝' },
+          { role: 'paste', label: '粘贴' },
+          { role: 'selectAll', label: '全选' },
         ],
       },
       {

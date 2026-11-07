@@ -16,11 +16,15 @@ import { t } from '../i18n';
 
 type Handle = 'nw' | 'ne' | 'sw' | 'se';
 
+/** Smallest note a free resize leaves: room for the title and a couple of lines. */
+const NOTE_MIN = { w: 120, h: 80 };
+
 type Drag =
   | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number }
   | { kind: 'marquee'; x0: number; y0: number; base: string[] }
   | { kind: 'move'; wx: number; wy: number; origins: Map<string, { x: number; y: number }>; snapshot: CanvasItem[]; moved: boolean; clicked: string; modifier: boolean }
-  | { kind: 'resize'; anchor: { x: number; y: number }; dir: { x: number; y: number }; start: Rect; origins: Map<string, Rect>; snapshot: CanvasItem[] }
+  // `free`: width and height scale separately, down to these factors; null keeps the proportions.
+  | { kind: 'resize'; anchor: { x: number; y: number }; dir: { x: number; y: number }; start: Rect; origins: Map<string, Rect>; snapshot: CanvasItem[]; free: { x: number; y: number } | null }
   | { kind: 'link'; from: string; sx: number; sy: number; moved: boolean };
 
 /** Topmost item under a board point. */
@@ -167,6 +171,14 @@ export function Canvas() {
       } else if (handle && selected.length) {
         const b = boundsOf(selected)!;
         const dir = { x: handle.includes('e') ? 1 : -1, y: handle.includes('s') ? 1 : -1 };
+        // Notes are boxes of text at a fixed font size, so they take any shape; a picture would stretch.
+        // A note already below the minimum can still grow, just not shrink further.
+        const free = selected.every((i) => i.kind === 'text')
+          ? {
+              x: Math.min(1, NOTE_MIN.w / Math.min(...selected.map((i) => i.w))),
+              y: Math.min(1, NOTE_MIN.h / Math.min(...selected.map((i) => i.h))),
+            }
+          : null;
         drag.current = {
           kind: 'resize',
           dir,
@@ -174,6 +186,7 @@ export function Canvas() {
           start: b,
           origins: new Map(selected.map((i) => [i.id, { x: i.x, y: i.y, w: i.w, h: i.h }])),
           snapshot: beginGesture(),
+          free,
         };
       } else {
         const itemId = target.closest('[data-item-id]')?.getAttribute('data-item-id');
@@ -246,16 +259,18 @@ export function Canvas() {
       const fx = ((w.x - d.anchor.x) * d.dir.x) / d.start.w;
       const fy = ((w.y - d.anchor.y) * d.dir.y) / d.start.h;
       const s = Math.max(16 / Math.min(d.start.w, d.start.h), Math.max(fx, fy));
+      const sx = d.free ? Math.max(d.free.x, fx) : s;
+      const sy = d.free ? Math.max(d.free.y, fy) : s;
       updateItems(
         (list) => list.map((i) => {
           const o = d.origins.get(i.id);
           if (!o) return i;
           return {
             ...i,
-            x: Math.round(d.anchor.x + (o.x - d.anchor.x) * s),
-            y: Math.round(d.anchor.y + (o.y - d.anchor.y) * s),
-            w: Math.round(o.w * s),
-            h: Math.round(o.h * s),
+            x: Math.round(d.anchor.x + (o.x - d.anchor.x) * sx),
+            y: Math.round(d.anchor.y + (o.y - d.anchor.y) * sy),
+            w: Math.round(o.w * sx),
+            h: Math.round(o.h * sy),
           };
         }),
         false,
