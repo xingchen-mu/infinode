@@ -257,10 +257,15 @@ export function AgentButton() {
 
 const compact = new Intl.NumberFormat(lang === 'zh' ? 'zh-CN' : 'en', { notation: 'compact', maximumFractionDigits: 1 });
 
-/** "1.2万 tokens · $0.003" / "12.3K tokens · $0.003" */
+/** Costs come in US dollars (model list prices); the Chinese interface shows yuan at this rough fixed rate. */
+const CNY_PER_USD = 7.2;
+
+/** "1.2万 tokens · ¥0.022" / "12.3K tokens · $0.003" */
 function usageText(u: AgentUsage): string {
   const tokens = compact.format(u.tokens);
-  return `${tokens} tokens${u.cost > 0 ? ` · $${u.cost.toFixed(u.cost < 0.1 ? 3 : 2)}` : ''}`;
+  if (!(u.cost > 0)) return `${tokens} tokens`;
+  const cost = lang === 'zh' ? u.cost * CNY_PER_USD : u.cost;
+  return `${tokens} tokens · ${lang === 'zh' ? '¥' : '$'}${cost.toFixed(cost < 0.1 ? 3 : 2)}`;
 }
 
 export function AgentPanel() {
@@ -293,7 +298,14 @@ export function AgentPanel() {
         {status?.model && <span className="agent-model">{status.model.split('/').pop()}</span>}
         <span className="agent-head-gap" />
         {usage.tokens > 0 && (
-          <span className="agent-usage" title={t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）')}>
+          <span
+            className="agent-usage"
+            title={
+              lang === 'zh'
+                ? t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准）', { rate: CNY_PER_USD })
+                : t('这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）')
+            }
+          >
             {usageText(usage)}
           </span>
         )}

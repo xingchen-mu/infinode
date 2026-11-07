@@ -169,6 +169,8 @@ export const EN: Record<string, Translation> = {
   画布助手: 'Assistant',
   '这段对话用掉的 tokens 和费用（按模型的公开价格估算，以服务商账单为准）':
     "Tokens and cost of this conversation (estimated from the model's list price; your provider's bill is what counts)",
+  '这段对话用掉的 tokens 和费用（按模型的公开价格估算，美元按 1:{rate} 换成人民币，以服务商账单为准）':
+    "Tokens and cost of this conversation (estimated from the model's list price, in yuan at 1 USD = {rate} CNY; your provider's bill is what counts)",
   新对话: 'New conversation',
   收起: 'Close',
   '说说你想做什么，助手会在画布上出图、出视频，并把结果连到用到的节点上。':
