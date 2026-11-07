@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { AssetInfo, CanvasItem, Capabilities, MediaKind, Project, Task, TaskRequest, WorkflowLike } from '../../shared/types.ts';
-import { GAP, type Rect, boundsOf, displaySize, placeRow } from '../../shared/geometry.ts';
+import { GAP, type Rect, boundsOf, displaySize, intersects, placeRow } from '../../shared/geometry.ts';
 import type { AssetStore } from '../assets/store.ts';
 import type { ItemsPatch, ProjectStore } from '../projects/store.ts';
 import type { TaskManager } from '../tasks/manager.ts';
@@ -88,6 +88,7 @@ export function describeItem(deps: CanvasDeps, item: CanvasItem, promptChars = 8
   const state = stateOf(deps, item);
   const parts = [`\`${item.id}\` ${item.kind === 'video' ? '视频' : '图片'}`];
   if (item.name) parts.push(`「${clip(item.name, 40)}」`);
+  if (item.group) parts.push(`类型：${item.group}`);
   parts.push(state.done ? `${state.media.width}×${state.media.height}` : state.text);
   const inputs = item.inputs ?? (item.sourceId ? [item.sourceId] : []);
   if (inputs.length) parts.push(`由 ${inputs.map((id) => `\`${id}\``).join(' ')} 生成`);
@@ -136,15 +137,84 @@ export interface BatchJob {
   /** Board items used as inputs, in request order (drawn as links). */
   inputs: CanvasItem[];
   name?: string;
+  /** Image type (layout 'groups'): jobs of one type stack in one column. */
+  group?: string;
   /** Placeholder size; by default from the output size. */
   size?: { w: number; h: number };
 }
 
 /**
  * How a batch is placed: `row` / `column` as one block (beside the first job's first input, else where
- * the user looks), `beside`: each placeholder right of its own first input (e.g. a video beside its frame).
+ * the user looks), `beside`: each placeholder right of its own first input (e.g. a video beside its frame),
+ * `groups`: one column per image type (see placeGroups).
  */
-export type BatchLayout = 'row' | 'column' | 'beside';
+export type BatchLayout = 'row' | 'column' | 'beside' | 'groups';
+
+type Size = { w: number; h: number };
+type Point = { x: number; y: number };
+
+/** A column of `sizes` at `start.x`, moved down past anything in the way. */
+function stackDown(taken: Rect[], start: Point, sizes: Size[]): Point[] {
+  const w = Math.max(...sizes.map((s) => s.w));
+  const h = sizes.reduce((n, s) => n + s.h, 0) + GAP * (sizes.length - 1);
+  let y = start.y;
+  for (let tries = 0; tries < 100; tries++) {
+    const hits = taken.filter((r) => intersects({ x: start.x, y, w, h }, r, GAP / 2));
+    if (!hits.length) break;
+    y = Math.max(...hits.map((r) => r.y + r.h)) + GAP;
+  }
+  return sizes.map((s) => {
+    const p = { x: start.x, y };
+    y += s.h + GAP;
+    return p;
+  });
+}
+
+/**
+ * One column per image type, top to bottom in job order. A type that already has a column on the board
+ * continues below its lowest item; new types become columns side by side, beside the first job's first input
+ * (else `fallback`). Jobs without a type share one new column.
+ */
+export function placeGroups(items: CanvasItem[], jobs: Pick<BatchJob, 'group' | 'inputs'>[], sizes: Size[], fallback: (w: number, h: number) => Point): Point[] {
+  const positions: Point[] = [];
+  const taken: Rect[] = [...items];
+  const columns = new Map<string, number[]>();
+  jobs.forEach((job, i) => {
+    const key = job.group?.trim() ?? '';
+    columns.set(key, [...(columns.get(key) ?? []), i]);
+  });
+  const fresh: number[][] = [];
+  for (const [key, idx] of columns) {
+    const existing = key ? items.filter((it) => it.group === key) : [];
+    if (!existing.length) {
+      fresh.push(idx);
+      continue;
+    }
+    const last = existing.reduce((a, b) => (b.y + b.h > a.y + a.h ? b : a));
+    stackDown(taken, { x: last.x, y: last.y + last.h + GAP }, idx.map((i) => sizes[i])).forEach((p, n) => {
+      positions[idx[n]] = p;
+      taken.push({ ...p, ...sizes[idx[n]] });
+    });
+  }
+  if (fresh.length) {
+    const widths = fresh.map((idx) => Math.max(...idx.map((i) => sizes[i].w)));
+    const heights = fresh.map((idx) => idx.reduce((n, i) => n + sizes[i].h, 0) + GAP * (idx.length - 1));
+    const block = { w: widths.reduce((a, b) => a + b, 0) + GAP * 2 * (fresh.length - 1), h: Math.max(...heights) };
+    const a = jobs[fresh[0][0]].inputs[0];
+    const start = a ? { x: a.x + a.w + GAP * 3, y: a.y } : fallback(block.w, block.h);
+    const [origin] = placeRow(taken as CanvasItem[], start, [block]);
+    let x = origin.x;
+    fresh.forEach((idx, k) => {
+      let y = origin.y;
+      for (const i of idx) {
+        positions[i] = { x, y };
+        y += sizes[i].h + GAP;
+      }
+      x += widths[k] + GAP * 2;
+    });
+  }
+  return positions;
+}
 
 /**
  * Queues each job and puts a placeholder for it on the board, linked to its inputs. The page fills
@@ -175,7 +245,9 @@ export async function launchBatch(
   const fallback = (w: number, h: number) =>
     opts.view ? { x: opts.view.x - w / 2, y: opts.view.y - h / 2 } : bounds ? { x: bounds.x + bounds.w + GAP * 3, y: bounds.y } : { x: 0, y: 0 };
   let positions: { x: number; y: number }[];
-  if (opts.layout === 'beside') {
+  if (opts.layout === 'groups') {
+    positions = placeGroups(project.items, created.map(({ job }) => job), sizes, fallback);
+  } else if (opts.layout === 'beside') {
     const taken: Rect[] = [...project.items];
     positions = created.map(({ job }, i) => {
       const a = job.inputs[0];
@@ -212,6 +284,7 @@ export async function launchBatch(
     request: job.request,
     inputs: job.inputs.length ? job.inputs.map((it) => it.id) : undefined,
     name: job.name?.trim().slice(0, 60) || undefined,
+    group: job.group?.trim().slice(0, 30) || undefined,
     createdAt: now,
   }));
   await patchBoard(deps, projectId, { upsert: items });
@@ -219,15 +292,18 @@ export async function launchBatch(
   return { items, failed };
 }
 
-/** `count` runs of one request, side by side beside its first input. */
+/**
+ * `count` runs of one request beside its first input: images in their type's column (one new column when
+ * no type is given), other results side by side.
+ */
 export async function launch(
   deps: CanvasDeps,
   writer: ResultWriter,
   projectId: string,
-  opts: { request: TaskRequest; count: number; inputs: CanvasItem[]; name?: string; view?: { x: number; y: number } },
+  opts: { request: TaskRequest; count: number; inputs: CanvasItem[]; name?: string; group?: string; images?: boolean; view?: { x: number; y: number } },
 ): Promise<{ items: CanvasItem[]; error?: string }> {
-  const jobs = Array.from({ length: opts.count }, () => ({ request: opts.request, inputs: opts.inputs, name: opts.name }));
-  const { items, failed } = await launchBatch(deps, writer, projectId, jobs, { layout: 'row', view: opts.view });
+  const jobs = Array.from({ length: opts.count }, () => ({ request: opts.request, inputs: opts.inputs, name: opts.name, group: opts.group }));
+  const { items, failed } = await launchBatch(deps, writer, projectId, jobs, { layout: opts.images ? 'groups' : 'row', view: opts.view });
   if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
   return { items, error: failed[0]?.error };
 }

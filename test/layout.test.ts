@@ -52,6 +52,39 @@ test('a column batch stacks in order beside its first input, without overlaps', 
   assert.deepEqual(items[0].inputs, ['ref']);
 });
 
+test('the assistant puts each image type in its own column, and later images of a type go below it', async () => {
+  const ref = img('ref', 0, 0);
+  const { deps, writer, project } = fakeDeps([ref]);
+  const job = (name: string, group?: string): BatchJob => ({ request: request(name), inputs: [ref], name, group });
+  const noOverlaps = () => {
+    const media = project.items;
+    for (const a of media) for (const b of media) if (a !== b) assert.equal(intersects(a, b), false, `${a.name} / ${b.name}`);
+  };
+
+  // Mixed in one batch: one column per type, in the order the types first appear, side by side.
+  const { items } = await launchBatch(deps, writer, project.id, [job('程诺全身', '全身照'), job('程诺特写', '脸部特写'), job('小雨全身', '全身照'), job('小雨特写', '脸部特写')], { layout: 'groups' });
+  const [aFull, aFace, bFull, bFace] = items;
+  assert.deepEqual([aFull.group, aFace.group], ['全身照', '脸部特写']);
+  assert.equal(bFull.x, aFull.x, 'same column');
+  assert.ok(bFull.y > aFull.y + aFull.h, 'below, in order');
+  assert.equal(bFace.x, aFace.x);
+  assert.ok(aFace.x > aFull.x + aFull.w, 'next column to the right');
+  assert.equal(aFace.y, aFull.y, 'columns start level');
+  assert.ok(aFull.x > ref.x + ref.w);
+  noOverlaps();
+
+  // A later call with a type that is already on the board continues that column.
+  const { items: [cFull] } = await launchBatch(deps, writer, project.id, [job('阿杰全身', '全身照')], { layout: 'groups' });
+  assert.equal(cFull.x, aFull.x);
+  assert.ok(cFull.y > bFull.y + bFull.h);
+  // No type given: the results still stack, in a new column.
+  const { items: plain } = await launchBatch(deps, writer, project.id, [job('v1'), job('v2')], { layout: 'groups' });
+  assert.equal(plain[0].x, plain[1].x);
+  assert.ok(plain[1].y > plain[0].y + plain[0].h);
+  assert.ok(![aFull.x, aFace.x].includes(plain[0].x));
+  noOverlaps();
+});
+
 test('videos placed beside their frames keep one row per shot, at the frame height', async () => {
   const frames = [img('f1', 0, 0), img('f2', 0, 320), img('f3', 0, 640)];
   const { deps, writer, project } = fakeDeps([...frames]);

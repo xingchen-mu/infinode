@@ -353,6 +353,8 @@ export interface CanvasItem {
   name?: string;
   /** Text items: the note (light Markdown); `name` is its title. */
   text?: string;
+  /** Image type the assistant filed it under (e.g. 全身照, 关键帧): one column per type on the board. */
+  group?: string;
   createdAt: number;
 }
 

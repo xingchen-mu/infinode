@@ -231,11 +231,11 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       },
     }),
 
-    tool<{ prompt: string; model?: ImageModel; reference_ids?: string[]; aspect?: string; quality?: '1k' | '2k'; count?: number; name?: string }>({
+    tool<{ prompt: string; model?: ImageModel; reference_ids?: string[]; aspect?: string; quality?: '1k' | '2k'; count?: number; name?: string; group?: string }>({
       name: 'generate_image',
       label: msg('生成图片'),
       description:
-        '在画布上生成图片，结果放在第一张参考图旁边并连线。提交后立刻返回新节点 id，不等结果。' +
+        '在画布上生成图片，结果放在第一张参考图旁边并连线（多张从上到下排成一列；写了 group 时排进那一类型的列）。提交后立刻返回新节点 id，不等结果。' +
         'qwen（默认，Qwen-Image）：质量高、能写中文字，可传最多 10 张参考图做编辑、换背景、保持人物一致，提示词里用「图1」「图2」按 reference_ids 的顺序指代。' +
         'zimage（Z-Image Turbo）：几秒出图的草图模型，不支持参考图。',
       parameters: {
@@ -248,6 +248,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           quality: { type: 'string', enum: ['1k', '2k'], description: '默认 1k' },
           count: { type: 'integer', minimum: 1, maximum: 4, description: '张数，默认 1' },
           name: { type: 'string', description: '节点名称（可选，显示在画布上）' },
+          group: { type: 'string', description: '图片类型，如「全身照」「脸部特写」「场景」「关键帧」：同一类型的图从上到下排成一列，画布上已有这一列时接在它下面（可选）' },
         },
         required: ['prompt'],
       },
@@ -269,7 +270,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           images: media.map((m) => m.id),
         };
         const count = Math.min(4, Math.max(1, Math.round(args.count ?? 1)));
-        const { items, error } = await launch(deps, writer, ctx.projectId, { request, count, inputs: refs, name: args.name, view: ctx.view });
+        const { items, error } = await launch(deps, writer, ctx.projectId, { request, count, inputs: refs, name: args.name, group: args.group, images: true, view: ctx.view });
         const made = items.map((i) => `\`${i.id}\``).join(' ');
         return {
           text: `已提交 ${items.length} 张，新节点：${made}。每张${roughly(imageEstimate(deps.tasks.list(), request))}（前面有排队任务会更久）。${error ? `另有 ${count - items.length} 张提交失败：${error}` : ''}`,
@@ -364,6 +365,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       params?: Record<string, string | number | boolean>;
       count?: number;
       name?: string;
+      group?: string;
     }>({
       name: 'run_workflow',
       label: msg('运行工作流'),
@@ -380,6 +382,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           params: { type: 'object', description: '其它参数：键是 list_workflows 里 params.<id> 的 id，值是字符串、数字或布尔' },
           count: { type: 'integer', minimum: 1, maximum: 4 },
           name: { type: 'string', description: '节点名称（可选）' },
+          group: { type: 'string', description: '出图的工作流：图片类型，如「全身照」「脸部特写」「场景」「关键帧」：同一类型的图从上到下排成一列，画布上已有这一列时接在它下面（可选）' },
         },
         required: ['workflow_id'],
       },
@@ -420,6 +423,8 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           count,
           inputs: [...imageItems, ...videoItems],
           name: args.name ?? wf.name,
+          group: args.group,
+          images: wf.kind === 'image',
           view: ctx.view,
         });
         return {
@@ -533,12 +538,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
       },
     }),
 
-    tool<{ jobs: { prompt: string; reference_ids?: string[]; aspect?: string; name?: string }[]; model?: ImageModel; quality?: '1k' | '2k'; layout?: 'row' | 'column' }>({
+    tool<{ jobs: { prompt: string; reference_ids?: string[]; aspect?: string; name?: string; group?: string }[]; model?: ImageModel; quality?: '1k' | '2k' }>({
       name: 'batch_generate_images',
       label: msg('批量出图'),
       description:
-        `一次提交多张图（最多 ${MAX_BATCH} 张），每张有自己的提示词和参考图（规则同 generate_image）。新节点按顺序排成一行或一列。` +
-        `提交后立刻返回；${afterBatch}分镜关键帧用 layout=column（按镜头顺序从上到下），name 写镜头编号。`,
+        `一次提交多张图（最多 ${MAX_BATCH} 张），每张有自己的提示词和参考图（规则同 generate_image）。` +
+        '每张写 group（图片类型）：同一类型的图按顺序从上到下排成一列，不同类型的列并排；画布上已有这一类型的列时，新图接在它下面。同一类型的图在整个画布上用同一个 group 名。' +
+        `提交后立刻返回；${afterBatch}分镜关键帧 group 写「关键帧」、按镜头顺序提交，name 写镜头编号。`,
       parameters: {
         type: 'object',
         properties: {
@@ -553,13 +559,13 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
                 reference_ids: ids('参考图节点 id（只有 qwen 支持，最多 10 张）', 10),
                 aspect: { type: 'string', description: '如 16:9、9:16、1:1；auto = 跟第一张参考图一样' },
                 name: { type: 'string', description: '节点名称，如 S01 或「程诺 · 全身」' },
+                group: { type: 'string', description: '图片类型，如「全身照」「脸部特写」「场景」「关键帧」：同一类型的图从上到下排成一列，画布上已有这一列时接在它下面' },
               },
               required: ['prompt'],
             },
           },
           model: { type: 'string', enum: ['qwen', 'zimage'] },
           quality: { type: 'string', enum: ['1k', '2k'], description: '默认 1k' },
-          layout: { type: 'string', enum: ['row', 'column'], description: '默认 row' },
         },
         required: ['jobs'],
       },
@@ -584,9 +590,10 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
             },
             inputs: refs,
             name: j.name,
+            group: j.group,
           };
         });
-        const { items, failed } = await launchBatch(deps, writer, ctx.projectId, jobs, { layout: args.layout === 'column' ? 'column' : 'row', view: ctx.view });
+        const { items, failed } = await launchBatch(deps, writer, ctx.projectId, jobs, { layout: 'groups', view: ctx.view });
         if (!items.length) throw new Error(failed[0]?.error ?? t('提交失败'));
         ctx.notify?.(t('{n} 张图片', { n: items.length }), items);
         const list = items.map((i) => `${i.name ? `${i.name} → ` : ''}\`${i.id}\``).join('\n');
