@@ -26,7 +26,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      # The checks never start Electron: skip downloading it, and with it the outages of its host.
       - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - name: Typecheck and build
         run: npm run build
       - name: Unit tests
