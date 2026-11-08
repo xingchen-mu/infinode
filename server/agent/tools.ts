@@ -5,7 +5,19 @@ import { nanoid } from 'nanoid';
 import { msg } from '../../shared/i18n.ts';
 import { licenseLabel } from '../../shared/licenses.ts';
 import { list, t } from '../i18n.ts';
-import type { CanvasItem, ImageModel, Task, TaskRequest, VideoModel, WorkflowInput, WorkflowLike } from '../../shared/types.ts';
+import {
+  type AgentPrompt,
+  type AgentTodo,
+  type CanvasItem,
+  ENTRY_CHARS,
+  type ImageModel,
+  MEMORY_LIMIT,
+  type Task,
+  type TaskRequest,
+  type VideoModel,
+  type WorkflowInput,
+  type WorkflowLike,
+} from '../../shared/types.ts';
 import { GAP, boundsOf, displaySize, placeRow } from '../../shared/geometry.ts';
 import { publicAsset } from '../assets/store.ts';
 import {
@@ -25,6 +37,7 @@ import {
 } from './board.ts';
 import { imageEstimate, roughly, videoEstimate } from './estimate.ts';
 import { GUIDES } from './guides.ts';
+import type { MemoryOp } from './memory.ts';
 import { redoneVersion } from '../../shared/frames.ts';
 import { type Arrangement, type Side, arrange, besideOf, clearOf } from './layout.ts';
 import { type Tile, concatClips, contactSheet, lastFrame, probe, soundSpans, videoFrame } from './media.ts';
@@ -43,6 +56,10 @@ export interface ToolContext {
   notify?: (what: string, items: CanvasItem[]) => void;
   /** The agent already knows how these items ended (it waited or cancelled): no notice about them. */
   seen?: (ids: string[]) => void;
+  /** Replaces the to-do list the panel shows. */
+  todos?: (list: AgentTodo[]) => void;
+  /** Changes the board's or the user's memory. */
+  remember?: (ops: MemoryOp[]) => Promise<{ done: string[]; refused: string[] }>;
 }
 
 export interface ToolOutput {
@@ -56,9 +73,11 @@ export interface ToolOutput {
   /**
    * Hold the work until the user agrees in the panel; then `approve(payload)` runs it. `frames`: first
    * frames (or other items) the card shows; `since`: when it was made, so frames redone later replace them;
-   * `confirm`: the button's label, when not 开始.
+   * `confirm` / `reject`: the buttons' labels, when not 开始 / 不要; `body`: Markdown on the card (a plan).
    */
-  approval?: { title: string; detail: string; payload: Json; frames?: string[]; since?: number; confirm?: string };
+  approval?: { title: string; detail: string; payload: Json; frames?: string[]; since?: number; confirm?: string; reject?: string; body?: string; prompts?: AgentPrompt[] };
+  /** Options for the user to click in the panel; the answer comes back as their next message. */
+  question?: { text: string; options: { label: string; description?: string }[]; multiple?: boolean };
 }
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -78,6 +97,8 @@ export interface CanvasTool<A = Record<string, unknown>> {
   destructive?: boolean;
   /** What a call is doing, from its arguments. */
   describe(args: A): string;
+  /** The prompts a call would generate from, shown to the user to read and edit first (approval mode `prompts`). */
+  prompts?(args: A): AgentPrompt[];
   run(args: A, ctx: ToolContext): Promise<ToolOutput>;
   /** Does the work `run` asked approval for. */
   approve?(payload: Json, ctx: ToolContext): Promise<ToolOutput>;
@@ -350,6 +371,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         required: ['prompt'],
       },
       describe: (a) => clip(a.prompt ?? ''),
+      prompts: (a) => [{ label: a.name?.trim() ?? '', text: a.prompt ?? '', refs: a.reference_ids ?? [] }],
       async run(args, ctx) {
         const model = imageModel(args.model);
         const refIds = args.reference_ids ?? [];
@@ -400,6 +422,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         required: ['prompt'],
       },
       describe: (a) => clip(a.prompt ?? ''),
+      prompts: (a) => [{ label: a.name?.trim() ?? '', text: a.prompt ?? '', refs: a.image_ids ?? [] }],
       async run(args, ctx) {
         const model: VideoModel = args.model === 'minimax-ref' ? 'minimax-ref' : 'minimax';
         const imageIds = args.image_ids ?? [];
@@ -484,6 +507,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         required: ['workflow_id'],
       },
       describe: (a) => a.workflow_id,
+      prompts: (a) => (a.prompt?.trim() ? [{ label: a.name?.trim() ?? '', text: a.prompt, refs: [...(a.image_ids ?? []), ...(a.video_ids ?? [])] }] : []),
       async run(args, ctx) {
         const wf = deps.workflows().find((w) => w.id === args.workflow_id);
         if (!wf) throw new Error(t('没有 id 为 {id} 的工作流（用 list_workflows 查看）', { id: args.workflow_id }));
@@ -667,6 +691,7 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         required: ['jobs'],
       },
       describe: (a) => t('{n} 张', { n: a.jobs?.length ?? 0 }),
+      prompts: (a) => (a.jobs ?? []).slice(0, MAX_BATCH).map((j) => ({ label: j.name?.trim() ?? '', text: j.prompt ?? '', refs: j.reference_ids ?? [] })),
       async run(args, ctx) {
         const model = imageModel(args.model);
         const p = await readBoard(deps, ctx.projectId);
@@ -736,6 +761,8 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
         required: ['jobs'],
       },
       describe: (a) => t('{n} 段', { n: a.jobs?.length ?? 0 }),
+      prompts: (a) =>
+        (a.jobs ?? []).slice(0, MAX_BATCH).map((j) => ({ label: j.name?.trim() ?? '', text: j.prompt ?? '', refs: [j.first_frame_id, ...(j.last_frame_id ? [j.last_frame_id] : [])].filter(Boolean) })),
       async run(args, ctx) {
         const p = await readBoard(deps, ctx.projectId);
         const quality = args.quality === '720p' ? '720p' : '480p';
@@ -1261,6 +1288,165 @@ export function canvasTools(deps: CanvasDeps, writer: ResultWriter, host: ToolHo
           items: [item.id],
         };
       },
+    }),
+
+    // In the panel only: outside agents have their own to-do lists, questions and plan modes.
+    ...(host === 'panel' ? panelTools() : []),
+  ];
+}
+
+const TODO_STATES = ['pending', 'in_progress', 'completed'] as const;
+const MAX_TODOS = 30;
+const MAX_OPTIONS = 6;
+
+/** The to-do list, asking the user, and handing in a plan: what the panel shows and answers. */
+function panelTools(): CanvasTool[] {
+  return [
+    tool<{ todos: { content: string; status: AgentTodo['status'] }[] }>({
+      name: 'update_todos',
+      readOnly: true,
+      label: msg('待办'),
+      description:
+        '多步的任务（三步以上，比如做一部短剧、整理一整块画布）开始时，把步骤列成待办清单，用户在面板顶部能看到进度。每次传完整的清单，会整个替换。' +
+        '同一时间只有一项 in_progress；做完一项马上标 completed，不要攒着一起标；计划变了就改清单。一两步就能做完的事不用列。',
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            maxItems: MAX_TODOS,
+            items: {
+              type: 'object',
+              properties: { content: { type: 'string', description: '这一步做什么，一句话' }, status: { type: 'string', enum: TODO_STATES } },
+              required: ['content', 'status'],
+            },
+          },
+        },
+        required: ['todos'],
+      },
+      describe: (a) => t('{done}/{total} 完成', { done: a.todos?.filter((x) => x.status === 'completed').length ?? 0, total: a.todos?.length ?? 0 }),
+      async run(args, ctx) {
+        const list: AgentTodo[] = (args.todos ?? [])
+          .map((x) => ({ content: String(x.content ?? '').trim().slice(0, 120), status: TODO_STATES.includes(x.status) ? x.status : 'pending' }))
+          .filter((x) => x.content)
+          .slice(0, MAX_TODOS);
+        ctx.todos?.(list);
+        const done = list.filter((x) => x.status === 'completed').length;
+        const now = list.find((x) => x.status === 'in_progress');
+        return {
+          text: `待办已更新：${done}/${list.length} 完成${now ? `，正在做「${now.content}」` : ''}`,
+          summary: t('{done}/{total} 完成', { done, total: list.length }),
+        };
+      },
+    }),
+
+    tool<{ question: string; options: { label: string; description?: string }[]; multiple?: boolean }>({
+      name: 'ask_user',
+      readOnly: true,
+      label: msg('提问'),
+      description:
+        `需要用户拍板时（画风、比例、几个镜头、两个方案选哪个），在面板上给出 2–${MAX_OPTIONS} 个可以直接点的选项，用户也可以自己填。用户的回答会作为下一条消息发来。` +
+        '调用后告诉用户你在等他选，然后结束这一轮。一次只问一个问题；能自己定的小事不要问，不要用它确认生成（批量视频自带确认卡）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: '问题，一句话' },
+          options: {
+            type: 'array',
+            minItems: 2,
+            maxItems: MAX_OPTIONS,
+            items: {
+              type: 'object',
+              properties: { label: { type: 'string', description: '选项，几个字' }, description: { type: 'string', description: '选这个会怎样（可选）' } },
+              required: ['label'],
+            },
+          },
+          multiple: { type: 'boolean', description: '可以多选，默认单选' },
+        },
+        required: ['question', 'options'],
+      },
+      describe: (a) => clip(a.question ?? ''),
+      async run(args) {
+        const text = String(args.question ?? '').trim().slice(0, 300);
+        const options = (args.options ?? [])
+          .map((o) => ({ label: String(o.label ?? '').trim().slice(0, 60), ...(o.description?.trim() ? { description: o.description.trim().slice(0, 200) } : {}) }))
+          .filter((o) => o.label)
+          .slice(0, MAX_OPTIONS);
+        if (!text || options.length < 2) throw new Error(t('要有一个问题和至少两个选项'));
+        return {
+          text: `已在面板上问用户「${text}」（选项：${options.map((o) => o.label).join(' / ')}）。用户的回答会作为下一条消息发来。现在告诉用户在等他选，然后结束这一轮。`,
+          summary: text,
+          question: { text, options, ...(args.multiple ? { multiple: true } : {}) },
+        };
+      },
+    }),
+
+    tool<{ changes: { action: MemoryOp['action']; scope: MemoryOp['scope']; id?: string; type?: MemoryOp['type']; text?: string; why?: string }[] }>({
+      name: 'remember',
+      readOnly: true,
+      label: msg('记忆'),
+      description:
+        '把值得长期记住的事写进记忆，或者改掉、删掉旧的（id 见系统提示词最后的「记忆」）。scope board 只对这块画布有效（type：setting 人物、画风、世界设定；decision 定下来的事，包括否掉的方案；preference 这部作品的偏好），' +
+        `scope user 对所有画布都有效（type：preference 用户的长期偏好；feedback 用户纠正过的做法）。每条一句话，写清楚是什么，原因写在 why。一条不超过 ${ENTRY_CHARS} 字；画布记忆最多 ${MEMORY_LIMIT.board} 字，用户偏好最多 ${MEMORY_LIMIT.user} 字，满了就合并或删掉过时的。` +
+        '已有相近的就 update，不要重复记；用户改了主意就 update 或 delete。不要记画布上已有的内容（剧本、分镜、提示词）、临时进度和一次性的要求。',
+      parameters: {
+        type: 'object',
+        properties: {
+          changes: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 10,
+            items: {
+              type: 'object',
+              properties: {
+                action: { type: 'string', enum: ['add', 'update', 'delete'] },
+                scope: { type: 'string', enum: ['board', 'user'] },
+                id: { type: 'string', description: 'update / delete 时：记忆的 id' },
+                type: { type: 'string', enum: ['setting', 'decision', 'preference', 'feedback'] },
+                text: { type: 'string' },
+                why: { type: 'string', description: '原因（可选）' },
+              },
+              required: ['action', 'scope'],
+            },
+          },
+        },
+        required: ['changes'],
+      },
+      describe: (a) => t('{n} 处改动', { n: a.changes?.length ?? 0 }),
+      async run(args, ctx) {
+        if (!ctx.remember) throw new Error(t('这里不能写记忆'));
+        const ops = (args.changes ?? []).slice(0, 10).map((c) => ({ ...c, scope: c.scope === 'user' ? ('user' as const) : ('board' as const) }));
+        const { done, refused } = await ctx.remember(ops);
+        return {
+          text: [...done, ...refused.map((reason) => t('没写入：{reason}', { reason }))].join('\n') || t('没有变化'),
+          summary: done.length ? done.join(t('；')) : refused.length ? t('没写入：{reason}', { reason: refused[0] }) : t('没有变化'),
+        };
+      },
+    }),
+
+    tool<{ plan: string }>({
+      name: 'present_plan',
+      readOnly: true,
+      label: msg('方案'),
+      description:
+        '计划模式下，把想好的完整方案交给用户确认：要做什么、分几步、每一步出什么（几张图、几段视频）、大概要多久、还有什么要用户定。用 Markdown 写，写具体，不写空话。' +
+        '调用后告诉用户方案在等他确认，然后结束这一轮。用户点「按这个做」后计划模式关闭，你会收到通知再动手；用户不同意时会告诉你要改哪里。',
+      parameters: {
+        type: 'object',
+        properties: { plan: { type: 'string', description: '方案全文（Markdown）' } },
+        required: ['plan'],
+      },
+      describe: () => '',
+      async run(args) {
+        const plan = String(args.plan ?? '').trim().slice(0, 8000);
+        if (!plan) throw new Error(t('方案是空的'));
+        return {
+          text: '方案已经放在面板上等用户确认。现在告诉用户方案在等他确认，然后结束这一轮。',
+          summary: t('等待确认'),
+          approval: { title: t('按这个方案做吗？'), detail: '', body: plan, payload: {}, confirm: t('按这个做'), reject: t('再改改') },
+        };
+      },
+      approve: async () => ({ text: '用户确认了方案。', summary: t('已确认方案') }),
     }),
   ];
 }

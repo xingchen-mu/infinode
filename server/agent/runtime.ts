@@ -19,7 +19,8 @@ import {
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
-import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage, AgentView, CanvasItem, Task } from '../../shared/types.ts';
+import type { AgentCommand, AgentContext, AgentEntry, AgentMemories, AgentMemory, MemoryScope, AgentEventData, AgentPrompt, AgentQuestion, AgentStatus, AgentTodo, AgentUsage, AgentView, ApprovalMode, CanvasItem, Task } from '../../shared/types.ts';
+import { COMMAND_NAME, MAX_COMMANDS, MAX_COMMAND_PROMPT, builtinCommand } from '../../shared/commands.ts';
 import { type Lang, type Vars, msg } from '../../shared/i18n.ts';
 import { config } from '../config.ts';
 import { serverLang, t } from '../i18n.ts';
@@ -30,6 +31,7 @@ import { speedNote } from './estimate.ts';
 import { SUMMARY_PROMPT, commercialRules, languageRule, systemPrompt } from './prompt.ts';
 import { type CanvasTool, type Json, type ToolContext, canvasTools } from './tools.ts';
 import { writeJson } from './write.ts';
+import { type MemoryOp, MemoryStore, memoryBlock } from './memory.ts';
 
 const DEFAULT_MODEL = 'deepseek/deepseek-flash';
 const THINKING = new Set<ThinkingLevel>(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
@@ -90,6 +92,18 @@ interface Session {
   commercial: boolean;
   /** The interface language the model was last told to answer in. */
   lang: Lang;
+  /** The assistant's to-do list for the task at hand, as the panel shows it. */
+  todos: AgentTodo[];
+  /** Plan mode: only reading and proposing until the user accepts a plan. */
+  plan: boolean;
+  /** The user switched plan mode off since the model last heard: the next message says so. */
+  planOff?: boolean;
+  /** Per user message (by timestamp): the board snapshot taken as it was sent, and the to-do list then. */
+  checkpoints: Record<string, { snapshot: string; todos: AgentTodo[] }>;
+  /** Condensed or cleared since the last request, whose size no longer says how full the context is. */
+  contextStale?: boolean;
+  /** The user edited the memory since the model last read it: the next message carries it. */
+  memoryNotice?: boolean;
 }
 
 /** A batch the agent asked to hear about when it finishes (kept on disk, so a restart does not lose it). */
@@ -103,10 +117,93 @@ interface ToolDetails {
   summary?: string;
   items?: string[];
   /** `replaced`: a newer card of the same tool took its place before the user answered. */
-  approval?: { title: string; detail: string; state: 'pending' | 'approved' | 'rejected' | 'replaced'; payload: Json; frames?: string[]; since?: number; confirm?: string };
+  approval?: {
+    title: string;
+    detail: string;
+    state: 'pending' | 'approved' | 'rejected' | 'replaced';
+    payload: Json;
+    frames?: string[];
+    since?: number;
+    confirm?: string;
+    reject?: string;
+    body?: string;
+    prompts?: AgentPrompt[];
+  };
+  question?: AgentQuestion;
 }
 
 const AGENT_APPROVAL = '__infinode_agent_approval';
+
+/**
+ * The user's edits to the prompts on a card, written into the work it holds: `jobs[i].prompt` of a batch, or
+ * `prompt` of a single call. Returns each changed prompt as the model should hear of it.
+ */
+function editPrompts(target: Json, shown: AgentPrompt[], given: string[]): string[] {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return [];
+  const jobs = Array.isArray(target.jobs) ? (target.jobs as { prompt?: Json; name?: Json }[]) : undefined;
+  const out: string[] = [];
+  shown.forEach((p, i) => {
+    const text = typeof given[i] === 'string' ? given[i].trim().slice(0, 8000) : '';
+    if (!text || text === p.text) return;
+    if (jobs) {
+      // Prompts are listed for the jobs that have one, in order.
+      const job = jobs.filter((j) => typeof j.prompt === 'string' && j.prompt.trim())[i];
+      if (!job) return;
+      job.prompt = text;
+    } else if (i === 0 && typeof target.prompt === 'string') target.prompt = text;
+    else return;
+    out.push(`${p.label ? `${p.label}：` : ''}${text}`);
+  });
+  return out;
+}
+
+/** What condensing found worth remembering, after the summary. */
+const MEMORY_UPDATES = /<memory_updates>([\s\S]*?)<\/memory_updates>/;
+
+/** The memory changes a summary ends with; whatever is not well-formed is left out. */
+export function memoryUpdates(text: string): MemoryOp[] {
+  const m = MEMORY_UPDATES.exec(text);
+  if (!m) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(m[1].trim() || '[]');
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((o): o is Record<string, unknown> => Boolean(o) && typeof o === 'object')
+    .filter((o) => (o.action === 'add' || o.action === 'update' || o.action === 'delete') && (o.scope === 'board' || o.scope === 'user'))
+    .slice(0, 20)
+    .map((o) => ({
+      action: o.action as MemoryOp['action'],
+      scope: o.scope as MemoryScope,
+      ...(typeof o.id === 'string' ? { id: o.id } : {}),
+      ...(typeof o.type === 'string' ? { type: o.type as MemoryOp['type'] } : {}),
+      ...(typeof o.text === 'string' ? { text: o.text } : {}),
+      ...(typeof o.why === 'string' ? { why: o.why } : {}),
+    }));
+}
+
+/** Tools without a row in the panel: the to-do list shows on its own. */
+const QUIET = new Set(['update_todos']);
+
+/** Saved /commands as given by the page: names unique and not a built-in's, prompts not empty. */
+export function checkCommands(list: unknown): AgentCommand[] {
+  if (!Array.isArray(list)) throw new RequestError(t('请求格式错误'));
+  if (list.length > MAX_COMMANDS) throw new RequestError(t('最多 {n} 个命令', { n: MAX_COMMANDS }));
+  const seen = new Set<string>();
+  return list.map((c: { name?: unknown; prompt?: unknown }) => {
+    const name = String(c?.name ?? '').trim().replace(/^\//, '');
+    const prompt = String(c?.prompt ?? '').trim().slice(0, MAX_COMMAND_PROMPT);
+    if (!COMMAND_NAME.test(name)) throw new RequestError(t('命令名「{name}」不能有空格或斜杠，最长 20 个字', { name }));
+    if (builtinCommand(name)) throw new RequestError(t('「{name}」是内置命令，换个名字', { name }));
+    if (seen.has(name.toLowerCase())) throw new RequestError(t('有两个命令都叫「{name}」', { name }));
+    if (!prompt) throw new RequestError(t('命令「{name}」的内容是空的', { name }));
+    seen.add(name.toLowerCase());
+    return { name, prompt };
+  });
+}
 
 const ACTIVE = new Set(['queued', 'running']);
 
@@ -345,6 +442,8 @@ export class AgentHub {
     return { ...rest, ...(issue ? { reason: t(issue[0], issue[1]) } : {}) };
   }
   private readonly dir = join(config.dataDir, 'agent');
+  private readonly commandsFile = join(this.dir, 'commands.json');
+  private readonly memory = new MemoryStore(this.dir);
   private readonly sessions = new Map<string, Promise<Session>>();
   /** Sessions once open. */
   private readonly live = new Map<string, Session>();
@@ -357,7 +456,7 @@ export class AgentHub {
   private model?: Model<Api>;
   private thinking!: ThinkingLevel;
   private vision = false;
-  private approvalMode: 'risky' | 'always' = 'risky';
+  private approvalMode: ApprovalMode = 'risky';
   private readonly tools: CanvasTool[];
   private readonly labels: Map<string, CanvasTool>;
   private readonly opts: { models?: Models; model?: string; compactAt?: number; clearAt?: number };
@@ -461,7 +560,21 @@ export class AgentHub {
 
   async view(projectId: string): Promise<AgentView> {
     const s = await this.session(projectId);
-    return { entries: this.entries(s), running: s.running, usage: s.usage };
+    return { entries: this.entries(s), running: s.running, usage: s.usage, todos: s.todos, plan: s.plan, context: this.contextOf(s) };
+  }
+
+  /** How full the context was at the last request, against the size at which it is condensed. */
+  private contextOf(s: Session): AgentContext | null {
+    if (s.contextStale) return null;
+    const last = s.agent.state.messages.findLast((m) => m.role === 'assistant') as AssistantMessage | undefined;
+    const u = last?.usage;
+    return u ? { used: u.input + u.cacheRead + u.cacheWrite + u.output, limit: this.compactAt } : null;
+  }
+
+  /** A user message as the panel shows it, offering to go back to it when the board was saved as it was sent. */
+  private userRow(s: Session, m: UserMessage): AgentEntry {
+    const row = userEntry(m);
+    return row.kind === 'user' && s.checkpoints[m.timestamp] ? { ...row, rewind: true } : row;
   }
 
   /** Starts a run, or steers the one in progress. Returns once the message is accepted. */
@@ -473,12 +586,13 @@ export class AgentHub {
     s.autoRuns = 0;
     const { view } = input;
     if (view && Number.isFinite(view.x) && Number.isFinite(view.y)) s.view = { x: view.x, y: view.y };
-    const message: UserMessage = {
-      role: 'user',
-      content: (await this.boardContext(projectId, input.selection ?? [])) + text.slice(0, MAX_MESSAGE),
-      timestamp: Date.now(),
-    };
-    this.emit({ projectId, entry: userEntry(message) });
+    this.skipQuestions(s);
+    const content = (await this.boardContext(s, input.selection ?? [])) + text.slice(0, MAX_MESSAGE);
+    // What "go back to here" returns the board to: as it is while the user sends this.
+    const point = await this.deps.projects.createSnapshot(projectId, 'checkpoint', { checkpoint: true }).catch(() => undefined);
+    const message: UserMessage = { role: 'user', content, timestamp: Date.now() };
+    if (point) s.checkpoints[message.timestamp] = { snapshot: point.id, todos: s.todos };
+    this.emit({ projectId, entry: this.userRow(s, message) });
     if (s.running) {
       s.agent.steer(message);
       s.interrupt.abort();
@@ -514,8 +628,8 @@ export class AgentHub {
     if (this.dropWatches(projectId)) this.event(s, t('已停止：已提交的任务会继续跑，跑完后助手不会再自动接着做'));
   }
 
-  /** The user's answer to work a tool held for approval. */
-  async approve(projectId: string, id: string, ok: boolean) {
+  /** The user's answer to work a tool held for approval; `prompts`: the card's prompts as the user left them. */
+  async approve(projectId: string, id: string, ok: boolean, prompts?: string[]) {
     const s = await this.session(projectId);
     const result = s.agent.state.messages.find((m) => m.role === 'toolResult' && m.toolCallId === id) as ToolResultMessage | undefined;
     const details = result?.details as ToolDetails | undefined;
@@ -538,9 +652,11 @@ export class AgentHub {
     approval.state = 'approved';
     details.summary = t('已确认，正在提交…');
     show();
+    let accepted = false;
     try {
       const payload = approval.payload as Json;
       const operation = payload && typeof payload === 'object' && !Array.isArray(payload) && payload[AGENT_APPROVAL] === true ? payload : undefined;
+      const edited = approval.prompts && prompts ? editPrompts((operation?.args ?? payload) as Json, approval.prompts, prompts) : [];
       const out = tool.approve
         ? await tool.approve(payload, this.context(s))
         : operation
@@ -548,9 +664,11 @@ export class AgentHub {
           : undefined;
       if (!out) throw new RequestError(t('这个请求已经不能执行了'));
       // The model now reads what was done, not the "waiting for the user" it got when the card was made.
-      result.content = [{ type: 'text', text: `用户已确认。${out.text}` }];
+      const changes = edited.length ? `用户改了 ${edited.length} 条提示词，按改过的生成：\n${edited.map((e) => `- ${e}`).join('\n')}\n` : '';
+      result.content = [{ type: 'text', text: `用户已确认。${changes}${out.text}` }];
       details.summary = out.summary;
       if (out.items?.length) details.items = out.items;
+      accepted = result.toolName === 'present_plan';
     } catch (err) {
       // Left pending so the user can try again (e.g. once ComfyUI is back).
       approval.state = 'pending';
@@ -560,6 +678,153 @@ export class AgentHub {
       show();
       await this.save(s);
     }
+    if (accepted) {
+      s.plan = false;
+      s.planOff = false;
+      this.emit({ projectId, plan: false });
+      await this.save(s);
+      this.wake(s, t('用户确认了方案，计划模式已关闭。\n按方案开始做；步骤多就先用 update_todos 列出来。'));
+    }
+  }
+
+  /** Questions the user wrote past instead of answering: no longer open. */
+  private skipQuestions(s: Session) {
+    for (const m of s.agent.state.messages) {
+      if (m.role !== 'toolResult') continue;
+      const question = (m.details as ToolDetails | undefined)?.question;
+      if (question?.state !== 'pending') continue;
+      question.state = 'skipped';
+      this.emit({ projectId: s.projectId, entry: this.resultEntry(m.toolCallId, m.toolName, m as ToolResultMessage, Date.now()) });
+    }
+  }
+
+  /** The user picked (or wrote) an answer to a question card: it goes to the assistant as their message. */
+  async answer(projectId: string, id: string, answer: string) {
+    const s = await this.session(projectId);
+    const result = s.agent.state.messages.find((m) => m.role === 'toolResult' && m.toolCallId === id) as ToolResultMessage | undefined;
+    const question = (result?.details as ToolDetails | undefined)?.question;
+    if (!result || !question) throw new RequestError(t('找不到这个问题'));
+    if (question.state === 'answered') throw new RequestError(t('这个问题已经回答过了'));
+    const text = answer.trim().slice(0, 2000);
+    if (!text) throw new RequestError(t('请输入内容'));
+    question.state = 'answered';
+    question.answer = text;
+    this.emit({ projectId, entry: this.resultEntry(id, result.toolName, result, Date.now()) });
+    await this.send(projectId, { text: t('回答「{question}」：{answer}', { question: question.text, answer: text }) });
+  }
+
+  /** Switches plan mode; the model hears of it with the user's next message. */
+  async setPlan(projectId: string, on: boolean) {
+    const s = await this.session(projectId);
+    if (s.plan === on) return;
+    s.plan = on;
+    s.planOff = !on;
+    this.emit({ projectId, plan: on });
+    await this.save(s);
+  }
+
+  /**
+   * Back to just before one of the user's messages: the board as it was then (the board as it is now is
+   * saved first, so this can be undone from 项目快照), the conversation up to that message, and the work
+   * started since cancelled. Returns the message's text, to edit and send again.
+   */
+  async rewind(projectId: string, id: string): Promise<{ text: string }> {
+    const s = await this.session(projectId);
+    if (s.running) throw new RequestError(t('助手正在工作，先停下来再回退'));
+    const at = Number(id.replace(/^u/, ''));
+    const messages = s.agent.state.messages;
+    const index = messages.findIndex((m) => m.role === 'user' && m.timestamp === at);
+    const point = s.checkpoints[at];
+    if (index < 0 || !point) throw new RequestError(t('回不到这条消息了：它已经整理进摘要，或者发的时候没有存下画布'));
+    const before = await readBoard(this.deps, projectId);
+    await this.deps.projects.createSnapshot(projectId, t('回退对话之前'), { auto: true });
+    const restored = await this.deps.projects.restoreSnapshot(projectId, point.snapshot);
+    if (!restored) throw new RequestError(t('回不到这条消息了：那时的画布没有找到'));
+    this.deps.changed(restored);
+    // Work started after the message would land on a board that no longer has its placeholders.
+    const kept = new Set(restored.items.map((i) => i.id));
+    for (const item of before.items) {
+      if (kept.has(item.id) || !item.taskId) continue;
+      const [task] = this.deps.tasks.list([item.taskId]);
+      if (task && ACTIVE.has(task.status)) await this.deps.tasks.cancel(item.taskId).catch(() => {});
+    }
+    this.dropWatches(projectId);
+    const text = textOf((messages[index] as UserMessage).content).replace(CONTEXT, '').trim();
+    s.agent.state.messages = messages.slice(0, index);
+    for (const key of Object.keys(s.checkpoints)) if (Number(key) >= at) delete s.checkpoints[key];
+    s.todos = point.todos;
+    await this.save(s);
+    this.emit({ projectId, todos: s.todos, context: this.contextOf(s) });
+    return { text };
+  }
+
+  /** The instructions with the memory after them: set when a conversation opens and after condensing, so the cache holds. */
+  private async promptFor(s: Pick<Session, 'projectId' | 'commercial' | 'lang'>): Promise<string> {
+    const memory = await this.memories(s.projectId);
+    return `${systemPrompt(this.state.vision, s.commercial, s.lang)}\n\n${memoryBlock(memory.board, memory.user)}`;
+  }
+
+  async memories(projectId: string): Promise<AgentMemories> {
+    const [board, user] = await Promise.all([this.memory.read('board', projectId), this.memory.read('user', projectId)]);
+    return { board, user };
+  }
+
+  /** The user's edit in the memory page; the assistant reads it with their next message. */
+  async saveMemory(projectId: string, scope: MemoryScope, memory: unknown): Promise<AgentMemory> {
+    if (!ID.test(projectId)) throw new RequestError(t('画布不存在'));
+    const saved = await this.memory.replace(scope, projectId, memory);
+    for (const s of this.live.values()) if (scope === 'user' || s.projectId === projectId) s.memoryNotice = true;
+    return saved;
+  }
+
+  /**
+   * What the work stands on, written into the summary: the to-do list, the notes and image columns on the
+   * board, and the guides read (their text goes with the condensed messages).
+   */
+  private async stateNote(s: Session, old: AgentMessage[]): Promise<string> {
+    const p = await readBoard(this.deps, s.projectId);
+    const lines: string[] = [];
+    if (s.todos.length) {
+      const mark = { completed: '✓', in_progress: '▶', pending: '·' } as const;
+      lines.push(`- 待办：${s.todos.map((x) => `${mark[x.status]} ${x.content}`).join('；')}`);
+    }
+    if (s.plan) lines.push('- 现在是计划模式');
+    const notes = p.items.filter((i) => i.kind === 'text').slice(-30);
+    if (notes.length) lines.push(`- 画布上的文本节点：${notes.map((i) => `\`${i.id}\`「${i.name || '无标题'}」${(i.text ?? '').length} 字`).join('，')}`);
+    const groups = new Map<string, string[]>();
+    for (const i of p.items) if (i.group) groups.set(i.group, [...(groups.get(i.group) ?? []), i.name ?? '']);
+    if (groups.size) {
+      const named = (names: string[]) => [...new Set(names.filter(Boolean))];
+      lines.push(
+        `- 图片分组：${[...groups].map(([g, names]) => `${g} ${names.length} 张${named(names).length ? `（${named(names).slice(0, 8).join('、')}${named(names).length > 8 ? '…' : ''}）` : ''}`).join('，')}`,
+      );
+    }
+    const guides = new Set<string>();
+    for (const m of old) {
+      if (m.role !== 'assistant') continue;
+      for (const c of m.content) {
+        if (c.type !== 'toolCall' || c.name !== 'read_guide') continue;
+        const a = c.arguments as { name?: string; section?: string };
+        guides.add(a.section ? `${a.name} · ${a.section}` : String(a.name));
+      }
+    }
+    if (guides.size) lines.push(`- 读过的手册（原文已经不在上下文里了，用到时用 read_guide 重新读那一节）：${[...guides].join('、')}`);
+    return lines.length ? `整理时的状态：\n${lines.join('\n')}` : '';
+  }
+
+  /** The user's saved /commands. */
+  async commands(): Promise<AgentCommand[]> {
+    try {
+      return checkCommands(JSON.parse(await readFile(this.commandsFile, 'utf8')));
+    } catch {
+      return [];
+    }
+  }
+
+  async saveCommands(list: unknown): Promise<AgentCommand[]> {
+    const commands = checkCommands(list);
+    await writeJson(this.commandsFile, () => commands);
+    return commands;
   }
 
   async clear(projectId: string) {
@@ -572,6 +837,11 @@ export class AgentHub {
     s.agent.reset();
     s.archived = [];
     s.usage = { tokens: 0, cost: 0 };
+    s.todos = [];
+    s.plan = false;
+    s.planOff = false;
+    s.checkpoints = {};
+    s.contextStale = false;
     await rm(this.file(projectId), { force: true });
     this.emit({ projectId, reset: true });
   }
@@ -585,6 +855,7 @@ export class AgentHub {
     this.live.delete(projectId);
     this.dropWatches(projectId);
     await rm(this.file(projectId), { force: true });
+    await this.memory.forget(projectId);
   }
 
   private file(projectId: string) {
@@ -604,7 +875,15 @@ export class AgentHub {
   private async open(projectId: string): Promise<Session> {
     if (!ID.test(projectId) || !(await this.deps.projects.get(projectId))) throw new RequestError(t('画布不存在'));
     if (!this.model) throw new RequestError(this.status.reason ?? t('画布助手还没有配置好'));
-    let saved: { version?: number; messages?: AgentMessage[]; usage?: AgentUsage; archived?: AgentEntry[] } = {};
+    let saved: {
+      version?: number;
+      messages?: AgentMessage[];
+      usage?: AgentUsage;
+      archived?: AgentEntry[];
+      todos?: AgentTodo[];
+      plan?: boolean;
+      checkpoints?: Session['checkpoints'];
+    } = {};
     try {
       saved = JSON.parse(await readFile(this.file(projectId), 'utf8'));
     } catch {
@@ -621,10 +900,13 @@ export class AgentHub {
       lang: serverLang(),
       usage: !saved.usage ? usageOf(messages) : (saved.version ?? 0) < 3 ? recount(saved.usage, messages) : saved.usage,
       archived: saved.archived ?? [],
+      todos: saved.todos ?? [],
+      plan: saved.plan === true,
+      checkpoints: saved.checkpoints ?? {},
     } as unknown as Session;
     s.agent = new Agent({
       initialState: {
-        systemPrompt: systemPrompt(this.state.vision, commercial, s.lang),
+        systemPrompt: await this.promptFor(s),
         model: this.model,
         thinkingLevel: this.thinking,
         tools: this.tools.filter((def) => this.vision || !def.vision).map((def) => this.agentTool(def, s)),
@@ -650,6 +932,11 @@ export class AgentHub {
       interrupt: s.interrupt.signal,
       notify: (what, items) => this.watch(s, what, items),
       seen: (ids) => this.unwatch(s, ids),
+      todos: (list) => {
+        s.todos = list;
+        this.emit({ projectId: s.projectId, todos: list });
+      },
+      remember: (ops) => this.memory.apply(s.projectId, ops),
       ...extra,
     };
   }
@@ -755,18 +1042,33 @@ export class AgentHub {
       description: def.description,
       parameters: Type.Unsafe(def.parameters as unknown as TSchema),
       execute: async (_id, args, signal, onUpdate) => {
+        if (s.plan && !def.readOnly) throw new Error(t('现在是计划模式，不能执行「{label}」：先用 present_plan 把方案交给用户确认', { label: t(def.label) }));
+        // The prompts the user reads (and may edit) before anything is generated from them.
+        const review = this.approvalMode !== 'risky' && def.prompts ? def.prompts(args as Record<string, unknown>).filter((p) => p.text.trim()) : [];
         // Tools with their own card (video batches, deleting) already ask, with more to say than this one.
-        if (this.approvalMode === 'always' && !def.readOnly && !def.approve) {
+        if (!def.readOnly && !def.approve && (this.approvalMode === 'always' || review.length)) {
           const summary = def.describe(args as Record<string, unknown>);
           return {
-            content: [{ type: 'text', text: t('等待用户确认后再执行。') }],
+            content: [
+              {
+                type: 'text',
+                text: review.length
+                  ? t('提示词已经放在面板上等用户确认，用户可能会改；确认后会自动提交。现在告诉用户在等他确认，然后结束这一轮。')
+                  : t('等待用户确认后再执行。'),
+              },
+            ],
             details: {
               summary: t('等待确认'),
               approval: {
-                title: t('确认助手操作「{label}」', { label: t(def.label) }),
-                detail: summary ? t('助手准备执行：{summary}。确认后才会修改画布或提交任务。', { summary }) : t('助手准备执行这项会修改画布或提交任务的操作。确认后才会执行。'),
+                title: review.length ? t('生成前确认提示词') : t('确认助手操作「{label}」', { label: t(def.label) }),
+                detail: review.length
+                  ? t('{label}：看过提示词再开始，可以直接改。', { label: t(def.label) })
+                  : summary
+                    ? t('助手准备执行：{summary}。确认后才会修改画布或提交任务。', { summary })
+                    : t('助手准备执行这项会修改画布或提交任务的操作。确认后才会执行。'),
                 state: 'pending' as const,
                 payload: { [AGENT_APPROVAL]: true, args: args as unknown as Json },
+                ...(review.length ? { prompts: review } : {}),
               },
             },
           };
@@ -776,12 +1078,17 @@ export class AgentHub {
           this.context(s, { signal, progress: (text) => onUpdate?.({ content: [{ type: 'text', text }], details: { summary: text } }) }),
         );
         if (out.approval) this.replaceCards(s, def.name);
+        // A card of the tool's own (video batches) shows the prompts too.
+        if (out.approval && review.length) out.approval.prompts = review;
+        // A new question takes the place of one still open.
+        if (out.question) this.skipQuestions(s);
         return {
           content: [{ type: 'text', text: out.text }, ...(out.images ?? []).map((img): ImageContent => ({ type: 'image', ...img }))],
           details: {
             summary: out.summary,
             ...(out.items?.length ? { items: out.items } : {}),
             ...(out.approval ? { approval: { ...out.approval, state: 'pending' as const } } : {}),
+            ...(out.question ? { question: { ...out.question, state: 'pending' as const } } : {}),
           },
         };
       },
@@ -804,8 +1111,8 @@ export class AgentHub {
   }
 
   /** Board summary and the selected items, as the model sees them. */
-  private async boardContext(projectId: string, selection: string[]): Promise<string> {
-    const p = await readBoard(this.deps, projectId);
+  private async boardContext(s: Session, selection: string[]): Promise<string> {
+    const p = await readBoard(this.deps, s.projectId);
     const selected = selection.map((id) => p.items.find((i) => i.id === id)).filter((i) => i !== undefined);
     const lines = [`画布「${p.name}」，共 ${p.items.length} 个节点。`];
     if (selected.length) {
@@ -816,6 +1123,21 @@ export class AgentHub {
       lines.push('用户没有选中节点。');
     }
     lines.push(speedNote(this.deps.tasks.list()));
+    if (s.plan) lines.push('现在是计划模式：只读画布、看图、读手册，不出图、不改画布。想清楚后用 present_plan 把完整方案交给用户确认；要用户拍板的先用 ask_user 问。');
+    else if (s.planOff) {
+      lines.push('用户关掉了计划模式，可以动手了。');
+      s.planOff = false;
+    }
+    if (s.memoryNotice) {
+      s.memoryNotice = false;
+      const memory = await this.memories(s.projectId);
+      lines.push('用户在记忆页改过记忆，以这一份为准：', memoryBlock(memory.board, memory.user));
+    }
+    const open = s.todos.filter((x) => x.status !== 'completed');
+    if (open.length) {
+      const mark = { completed: 'x', in_progress: '>', pending: ' ' } as const;
+      lines.push(`你的待办（${s.todos.length - open.length}/${s.todos.length} 完成）：`, ...s.todos.map((x) => `- [${mark[x.status]}] ${x.content}`));
+    }
     return `<canvas_context selection="${selected.map((i) => i.id).join(',')}">\n${lines.join('\n')}\n</canvas_context>\n\n`;
   }
 
@@ -859,6 +1181,8 @@ export class AgentHub {
     const { messages, freed, cleared } = clearOldToolUse(s.agent.state.messages);
     if (freed < CLEAR_WORTH) return;
     s.agent.state.messages = messages;
+    s.contextStale = true;
+    this.emit({ projectId: s.projectId, context: null });
     this.event(s, t('已清掉 {n} 处较早的工具结果，上下文少了 {chars} 字', { n: cleared, chars: freed }));
     await this.save(s);
   }
@@ -879,23 +1203,43 @@ export class AgentHub {
     this.event(s, focus === undefined ? t('对话比较长了，正在把较早的部分整理成摘要…') : t('正在把较早的对话整理成摘要…'));
     // In characters: Chinese runs about a token each, so this fits even a small window.
     const transcript = transcriptText(old, Math.min(120_000, Math.floor((this.model.contextWindow || Infinity) * 0.6)));
+    const memory = await this.memories(s.projectId);
     const reply = await this.models.completeSimple(this.model, {
       systemPrompt: SUMMARY_PROMPT,
-      messages: [{ role: 'user', content: focus ? `用户希望这次整理特别保留：${focus}\n\n${transcript}` : transcript, timestamp: Date.now() }],
+      messages: [
+        {
+          role: 'user',
+          content: [focus ? `用户希望这次整理特别保留：${focus}` : '', `现有记忆：\n${memoryBlock(memory.board, memory.user)}`, `要整理的对话：\n${transcript}`].filter(Boolean).join('\n\n'),
+          timestamp: Date.now(),
+        },
+      ],
     });
-    const summary = reply.content
+    const text = reply.content
       .map((c) => (c.type === 'text' ? c.text : ''))
       .join('')
       .trim();
     this.addUsage(s, reply);
+    const summary = text.replace(MEMORY_UPDATES, '').trim();
     if (reply.stopReason === 'error' || !summary) {
       this.event(s, t('整理摘要没成功，先保持原样'));
       return 'failed';
     }
-    const condensed: UserMessage = { role: 'user', content: summaryMessage(summary, userWords(old)), timestamp: Date.now() };
-    s.archived = [...s.archived, ...this.entriesOf(old, s)];
-    s.agent.state.messages = [...early.filter((m) => m.role === 'system'), condensed, ...messages.slice(cut)];
-    this.emit({ projectId: s.projectId, entry: userEntry(condensed) });
+    // Lasting things the conversation settled, which the assistant did not write down while working.
+    const { done } = await this.memory.apply(s.projectId, memoryUpdates(text));
+    if (done.length) this.event(s, t('整理时记下了 {n} 处记忆：{list}', { n: done.length, list: done.join(t('；')) }));
+    const state = await this.stateNote(s, old);
+    const condensed: UserMessage = { role: 'user', content: summaryMessage(state ? `${summary}\n\n${state}` : summary, userWords(old)), timestamp: Date.now() };
+    // Condensed messages cannot be gone back to: their messages are no longer there.
+    s.archived = [...s.archived, ...this.entriesOf(old, s).map((e) => (e.kind === 'user' ? { ...e, rewind: undefined } : e))];
+    for (const m of old) if (m.role === 'user') delete s.checkpoints[m.timestamp];
+    // The cache starts over from here anyway: the leading system message (the instructions, with the tools)
+    // gets the memory as it is now.
+    const systems = early.filter((m) => m.role === 'system');
+    const prompt = await this.promptFor(s);
+    const head = systems[0] === messages[0] ? [{ ...systems[0], content: prompt } as AgentMessage, ...systems.slice(1)] : systems;
+    s.agent.state.messages = [...head, condensed, ...messages.slice(cut)];
+    s.contextStale = true;
+    this.emit({ projectId: s.projectId, entry: userEntry(condensed), context: null });
     await this.save(s);
     return 'done';
   }
@@ -939,6 +1283,9 @@ export class AgentHub {
       messages: s.agent.state.messages.filter((m) => m.role !== 'system').map(withoutImages),
       usage: s.usage,
       archived: s.archived,
+      todos: s.todos,
+      plan: s.plan,
+      checkpoints: s.checkpoints,
     }));
   }
 
@@ -957,9 +1304,28 @@ export class AgentHub {
     const base = { kind: 'tool' as const, id, tool, label: def ? t(def.label) : tool, at, ...(details.items?.length ? { items: details.items } : {}) };
     if (!result) return { ...base, status: running ? 'running' : 'error', summary: running ? (def?.describe(args as Record<string, unknown>) ?? '') : t('没有完成') };
     if (result.isError) return { ...base, status: 'error', summary: clip(textOf(result.content), 300) };
+    const question = details.question;
+    if (question) {
+      // While open, the card shows the question: the row does not repeat it.
+      const summary = question.state === 'answered' ? t('已回答：{answer}', { answer: question.answer ?? '' }) : question.state === 'skipped' ? t('没有回答') : '';
+      return { ...base, status: question.state === 'pending' ? 'waiting' : 'done', summary, question };
+    }
     if (approval?.state === 'pending') {
-      const { title, detail, frames, since, confirm } = approval;
-      return { ...base, status: 'waiting', summary: details.summary ?? '', approval: { title, detail, ...(frames ? { frames, since } : {}), ...(confirm ? { confirm } : {}) } };
+      const { title, detail, frames, since, confirm, reject, body, prompts } = approval;
+      return {
+        ...base,
+        status: 'waiting',
+        summary: details.summary ?? '',
+        approval: {
+          title,
+          detail,
+          ...(frames ? { frames, since } : {}),
+          ...(confirm ? { confirm } : {}),
+          ...(reject ? { reject } : {}),
+          ...(body ? { body } : {}),
+          ...(prompts ? { prompts } : {}),
+        },
+      };
     }
     return { ...base, status: approval?.state === 'rejected' ? 'error' : 'done', summary: details.summary ?? '' };
   }
@@ -976,12 +1342,13 @@ export class AgentHub {
     for (const m of all) if (m.role === 'toolResult') results.set(m.toolCallId, m as ToolResultMessage);
     const out: AgentEntry[] = [];
     for (const m of all) {
-      if (m.role === 'user') out.push(userEntry(m));
+      if (m.role === 'user') out.push(this.userRow(s, m));
       if (m.role !== 'assistant') continue;
       const text = assistantEntry(m);
       if (text) out.push(text);
       for (const c of m.content) {
-        if (c.type === 'toolCall') out.push(this.resultEntry(c.id, c.name, results.get(c.id), m.timestamp, m === streamingMessage || pendingToolCalls.has(c.id), c.arguments));
+        // The to-do list has its own place in the panel.
+        if (c.type === 'toolCall' && !QUIET.has(c.name)) out.push(this.resultEntry(c.id, c.name, results.get(c.id), m.timestamp, m === streamingMessage || pendingToolCalls.has(c.id), c.arguments));
       }
     }
     return out;
@@ -1008,7 +1375,7 @@ export class AgentHub {
     const emit = (entry: AgentEntry) => this.emit({ projectId: s.projectId, entry });
     switch (e.type) {
       case 'message_start':
-        if (e.message.role === 'user') emit(userEntry(e.message));
+        if (e.message.role === 'user') emit(this.userRow(s, e.message));
         break;
       case 'message_update':
         if (e.message.role === 'assistant') this.pushText(s, assistantEntry(e.message));
@@ -1017,21 +1384,25 @@ export class AgentHub {
         if (e.message.role === 'assistant') {
           this.pushText(s, assistantEntry(e.message), true);
           this.addUsage(s, e.message);
-          this.emit({ projectId: s.projectId, usage: s.usage });
+          s.contextStale = false;
+          this.emit({ projectId: s.projectId, usage: s.usage, context: this.contextOf(s) });
         }
         break;
       case 'tool_execution_start': {
+        if (QUIET.has(e.toolName)) break;
         const def = this.labels.get(e.toolName);
         emit({ kind: 'tool', id: e.toolCallId, tool: e.toolName, label: def ? t(def.label) : e.toolName, status: 'running', summary: def?.describe(e.args) ?? '', at: Date.now() });
         break;
       }
       case 'tool_execution_update': {
+        if (QUIET.has(e.toolName)) break;
         const def = this.labels.get(e.toolName);
         const summary = (e.partialResult?.details as ToolDetails | undefined)?.summary ?? '';
         emit({ kind: 'tool', id: e.toolCallId, tool: e.toolName, label: def ? t(def.label) : e.toolName, status: 'running', summary, at: Date.now() });
         break;
       }
       case 'tool_execution_end':
+        if (QUIET.has(e.toolName)) break;
         emit(this.resultEntry(e.toolCallId, e.toolName, { isError: e.isError, content: e.result?.content ?? [], details: e.result?.details }, Date.now()));
         break;
     }

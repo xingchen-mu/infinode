@@ -36,5 +36,8 @@ function labelWithNumber(lang: Lang, zh: string): string | undefined {
 
 export const isLang = (v: unknown): v is Lang => v === 'zh' || v === 'en';
 
+/** What joins a list: "、" / ", ". */
+export const listSeparator = (lang: Lang) => (lang === 'zh' ? '、' : ', ');
+
 /** "a、b、c" / "a, b, c". */
-export const joinList = (lang: Lang, xs: string[]) => xs.join(lang === 'zh' ? '、' : ', ');
+export const joinList = (lang: Lang, xs: string[]) => xs.join(listSeparator(lang));

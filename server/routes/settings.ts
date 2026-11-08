@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { isLang } from '../../shared/i18n.ts';
+import { APPROVAL_MODES, type ApprovalMode } from '../../shared/types.ts';
 import { ComfyClient } from '../comfy/client.ts';
 import { CONTEXT_WINDOW, isContextWindow, isModelSource, normalizeComfyUrl } from '../settings.ts';
 import { normalizeEndpoint } from '../models/sources.ts';
@@ -39,7 +40,7 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
       clearAgentApiKey?: boolean;
       agentVision?: boolean;
       agentThinking?: string;
-      agentApprovalMode?: 'risky' | 'always';
+      agentApprovalMode?: ApprovalMode;
       /** null: back to the default. */
       agentContextWindow?: number | null;
       agentReasoning?: boolean;
@@ -123,7 +124,7 @@ export function registerSettingsRoutes(app: Hono, { settings, comfy, assets, cap
         clearApiKey: body.clearAgentApiKey,
         vision: typeof body.agentVision === 'boolean' ? body.agentVision : undefined,
         thinking: body.agentThinking,
-        approvalMode: body.agentApprovalMode === 'always' || body.agentApprovalMode === 'risky' ? body.agentApprovalMode : undefined,
+        approvalMode: APPROVAL_MODES.includes(body.agentApprovalMode as ApprovalMode) ? body.agentApprovalMode : undefined,
         contextWindow: body.agentContextWindow,
         reasoning: typeof body.agentReasoning === 'boolean' ? body.agentReasoning : undefined,
       });

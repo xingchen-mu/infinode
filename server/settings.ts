@@ -1,6 +1,6 @@
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { ModelSource, Settings } from '../shared/types.ts';
+import { APPROVAL_MODES, type ApprovalMode, type ModelSource, type Settings } from '../shared/types.ts';
 import { config } from './config.ts';
 import { isLang } from '../shared/i18n.ts';
 import { setServerLang, t } from './i18n.ts';
@@ -12,7 +12,7 @@ export interface AgentConfig {
   apiKey?: string;
   vision: boolean;
   thinking: string;
-  approvalMode: 'risky' | 'always';
+  approvalMode: ApprovalMode;
   /** For a custom endpoint: context length in tokens (unset: 128k) and whether the model reasons. */
   contextWindow?: number;
   reasoning: boolean;
@@ -57,7 +57,7 @@ export class SettingsStore {
       if (typeof saved.agentThinking === 'string' && saved.agentThinking.trim()) this.value.agentThinking = saved.agentThinking.trim();
       if (isContextWindow(saved.agentContextWindow)) this.value.agentContextWindow = saved.agentContextWindow;
       if (typeof saved.agentReasoning === 'boolean') this.value.agentReasoning = saved.agentReasoning;
-      if (saved.agentApprovalMode === 'risky' || saved.agentApprovalMode === 'always') this.value.agentApprovalMode = saved.agentApprovalMode;
+      if (APPROVAL_MODES.includes(saved.agentApprovalMode as ApprovalMode)) this.value.agentApprovalMode = saved.agentApprovalMode;
       if (isModelSource(saved.modelSource)) this.value.modelSource = saved.modelSource;
       if (typeof saved.modelEndpoint === 'string' && saved.modelEndpoint.trim()) this.value.modelEndpoint = saved.modelEndpoint.trim();
       const raw = saved as Partial<Settings> & { agentApiKey?: unknown; hfToken?: unknown };
@@ -126,7 +126,7 @@ export class SettingsStore {
     const apiKey = this.agentApiKey || process.env.AGENT_API_KEY?.trim() || undefined;
     const vision = this.value.agentVision ?? process.env.AGENT_VISION === '1';
     const thinking = this.value.agentThinking?.trim() || process.env.AGENT_THINKING?.trim() || 'low';
-    const approvalMode = this.value.agentApprovalMode === 'always' ? 'always' : 'risky';
+    const approvalMode = this.value.agentApprovalMode ?? 'risky';
     const contextWindow = this.value.agentContextWindow ?? envContextWindow();
     const reasoning = this.value.agentReasoning ?? process.env.AGENT_REASONING === '1';
     return { model, baseUrl, apiKey, vision, thinking, approvalMode, contextWindow, reasoning };
@@ -137,7 +137,7 @@ export class SettingsStore {
     baseUrl?: string;
     vision?: boolean;
     thinking?: string;
-    approvalMode?: 'risky' | 'always';
+    approvalMode?: ApprovalMode;
     /** null: back to the default. */
     contextWindow?: number | null;
     reasoning?: boolean;

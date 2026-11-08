@@ -3193,6 +3193,10 @@ body.agent-open .panel {
 
 .agent-hint {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11.5px;
   color: var(--text-3);
 }
@@ -3414,6 +3418,457 @@ body.agent-open .panel {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* A plan handed in for approval: the plan itself, scrolling when long. */
+.agent-plan {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  margin: 4px 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+/* The memory page: two scopes, each a list of short entries. */
+.agent-memory {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-memory-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-memory-head b {
+  font-size: 13.5px;
+}
+
+.agent-memory-size {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-memory-size.over {
+  color: var(--warn);
+}
+
+.agent-memory-empty {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.agent-memory-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.agent-memory-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-memory-meta {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.agent-memory-entry select,
+.agent-memory-entry textarea,
+.agent-memory-entry input {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
+.agent-memory-entry textarea {
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.agent-memory-entry input {
+  color: var(--text-2);
+}
+
+/* Prompts held for the user to read and edit before they are generated from. */
+.agent-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.agent-prompt-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.agent-prompt-edited {
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.agent-prompt textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 6px 8px;
+}
+
+.agent-prompt textarea:focus {
+  border-color: var(--border-2);
+}
+
+/* ---------------------------------------------------------------- agent: to-dos, questions, commands */
+
+.agent-context {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-context.full {
+  color: var(--warn);
+}
+
+.agent-todos {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px 8px;
+  font-size: 12.5px;
+}
+
+.agent-todos-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-todos-head svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.agent-todos-head b {
+  color: var(--text);
+  font-weight: 600;
+  flex: none;
+}
+
+.agent-todos-count {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+.agent-todos-now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-todos ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.agent-todos li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.agent-todos li svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin-top: 3px;
+}
+
+.agent-todos li.in_progress {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.agent-todos li.in_progress svg {
+  color: var(--accent);
+}
+
+.agent-todos li.completed {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.agent-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.agent-question b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.agent-question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.agent-option:hover:not(:disabled) {
+  border-color: var(--border-2);
+}
+
+.agent-option.on {
+  border-color: var(--accent);
+}
+
+.agent-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.agent-option.on:disabled {
+  opacity: 1;
+}
+
+.agent-option small {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.agent-question.skipped {
+  opacity: 0.75;
+}
+
+.agent-question-bar {
+  display: flex;
+  gap: 6px;
+}
+
+.agent-question-bar input,
+.agent-cmd input,
+.agent-cmd textarea {
+  flex: 1;
+  min-width: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 8px;
+}
+
+.agent-question-bar input:focus,
+.agent-cmd input:focus,
+.agent-cmd textarea:focus {
+  border-color: var(--border-2);
+}
+
+.agent-bubble-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.agent-rewind {
+  opacity: 0;
+  flex: none;
+  margin-top: 4px;
+}
+
+.agent-msg.user:hover .agent-rewind:not(:disabled),
+.agent-rewind:focus-visible {
+  opacity: 1;
+}
+
+.agent-input {
+  position: relative;
+}
+
+.agent-input.plan {
+  box-shadow: inset 0 2px 0 var(--warn);
+}
+
+.agent-plan-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.agent-plan-toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.agent-plan-toggle.on {
+  color: var(--warn);
+  border-color: #5a4a2a;
+}
+
+.agent-plan-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.agent-slash {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 100%;
+  margin-bottom: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+
+.agent-slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.agent-slash-item b {
+  color: var(--text);
+  font-weight: 600;
+  flex: none;
+}
+
+.agent-slash-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-slash-item.on {
+  background: var(--panel);
+}
+
+.agent-slash-item.manage {
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 6px 6px;
+  color: var(--text-3);
+}
+
+.agent-slash-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.agent-empty-tip {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.agent-cmd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.agent-cmd-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+}
+
+.agent-cmd textarea {
+  resize: vertical;
+  line-height: 1.55;
 }
 
 /* ---------------------------------------------------------------- licenses */

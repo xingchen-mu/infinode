@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, Download, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { LANGS, type Lang } from '../../shared/i18n';
 import { LICENSES, isBlock, licenseLabel, licenseTitle } from '../../shared/licenses';
-import type { ModelInstallInfo, ModelSource, Settings } from '../../shared/types';
+import type { ApprovalMode, ModelInstallInfo, ModelSource, Settings } from '../../shared/types';
 import { activeDownload, openDownloads } from '../models/actions';
 import { SourcePicker, modeLine, sourceHelp } from '../models/DownloadsModal';
 import { api } from '../lib/api';
@@ -50,7 +50,7 @@ export function SettingsModal() {
   const [agentKeyConfigured, setAgentKeyConfigured] = useState(false);
   const [agentVision, setAgentVision] = useState(false);
   const [agentThinking, setAgentThinking] = useState('low');
-  const [agentApprovalMode, setAgentApprovalMode] = useState<'risky' | 'always'>('risky');
+  const [agentApprovalMode, setAgentApprovalMode] = useState<ApprovalMode>('risky');
   const [agentContextWindow, setAgentContextWindow] = useState('');
   const [agentReasoning, setAgentReasoning] = useState(false);
   const [agentSaved, setAgentSaved] = useState('');
@@ -268,8 +268,12 @@ export function SettingsModal() {
           <label className="m-check"><input type="checkbox" checked={agentVision} onChange={(e) => setAgentVision(e.target.checked)} /><span>{t('启用视觉输入')}</span></label>
           <label className="m-help">{t('思考')} <select value={agentThinking} disabled={customAgent && !agentReasoning} onChange={(e) => setAgentThinking(e.target.value)}><option value="off">off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
         </div>
-        <label className="m-help">{t('操作确认')} <select value={agentApprovalMode} onChange={(e) => setAgentApprovalMode(e.target.value as 'risky' | 'always')}><option value="risky">{t('高风险操作确认')}</option><option value="always">{t('所有写入操作确认')}</option></select></label>
-        <div className="m-help">{agentApprovalMode === 'always' ? t('助手修改画布、提交生成或运行工作流前都会先等你确认。') : t('视频批量生成等高成本操作会确认，普通操作直接执行。')}</div>
+        <label className="m-help">{t('操作确认')} <select value={agentApprovalMode} onChange={(e) => setAgentApprovalMode(e.target.value as ApprovalMode)}><option value="risky">{t('高风险操作确认')}</option><option value="prompts">{t('生成前先看提示词')}</option><option value="always">{t('所有写入操作确认')}</option></select></label>
+        <div className="m-help">{agentApprovalMode === 'always'
+            ? t('助手修改画布、提交生成或运行工作流前都会先等你确认。')
+            : agentApprovalMode === 'prompts'
+              ? t('出图、出视频、运行工作流之前，先把提示词给你看，可以直接改，确认后才提交。')
+              : t('视频批量生成等高成本操作会确认，普通操作直接执行。')}</div>
         <div className="m-row">
           <button className="btn primary" onClick={() => void saveAgent()} disabled={!agentDirty || busy !== null}>{busy === 'agent' ? <Loader2 className="spin" /> : null}{t('保存助手配置')}</button>
           {agentKeyConfigured && <button className="btn ghost" onClick={() => void saveAgent(true)} disabled={busy !== null}>{t('清除 API key')}</button>}

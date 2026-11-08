@@ -1,4 +1,9 @@
 import type {
+  AgentCommand,
+  AgentMemories,
+  AgentMemory,
+  MemoryScope,
+  ApprovalMode,
   AgentEventData,
   AgentStatus,
   AgentView,
@@ -28,7 +33,7 @@ export type AgentSettingsPatch = {
   clearAgentApiKey?: boolean;
   agentVision?: boolean;
   agentThinking?: string;
-  agentApprovalMode?: 'risky' | 'always';
+  agentApprovalMode?: ApprovalMode;
   /** null: back to the default. */
   agentContextWindow?: number | null;
   agentReasoning?: boolean;
@@ -149,10 +154,22 @@ export const api = {
   clearAgent: (projectId: string) => request<{ ok: true }>(`/api/agent/${projectId}`, { method: 'DELETE' }),
   /** Condenses the conversation before the last message now; `focus`: what to keep in particular. */
   condenseAgent: (projectId: string, focus: string) => request<{ ok: true }>(`/api/agent/${projectId}/condense`, json('POST', { focus })),
+  /** Answers a question card; the answer goes to the assistant as the user's message. */
+  answerAgent: (projectId: string, id: string, answer: string) => request<{ ok: true }>(`/api/agent/${projectId}/answer`, json('POST', { id, answer })),
+  setAgentPlan: (projectId: string, on: boolean) => request<{ ok: true }>(`/api/agent/${projectId}/plan`, json('POST', { on })),
+  /** Board and conversation back to just before a user message; returns its text to edit and send again. */
+  rewindAgent: (projectId: string, id: string) => request<{ text: string }>(`/api/agent/${projectId}/rewind`, json('POST', { id })),
+  agentCommands: () => request<AgentCommand[]>('/api/agent/commands'),
+  agentMemory: (projectId: string) => request<AgentMemories>(`/api/agent/${projectId}/memory`),
+  saveAgentMemory: (projectId: string, scope: MemoryScope, memory: AgentMemory) =>
+    request<AgentMemory>(`/api/agent/${projectId}/memory`, json('PUT', { scope, memory })),
+  saveAgentCommands: (commands: AgentCommand[]) => request<AgentCommand[]>('/api/agent/commands', json('PUT', commands)),
   /** What this page shows, for outside agents (MCP) to act on "the selected items". */
   presence: (body: { projectId: string; selection: string[]; view: { x: number; y: number } }) =>
     request<{ ok: true }>('/api/presence', json('PUT', body)),
-  approveAgent: (projectId: string, id: string, ok: boolean) => request<{ ok: true }>(`/api/agent/${projectId}/approve`, json('POST', { id, ok })),
+  /** `prompts`: the card's prompts as the user left them (edited or not). */
+  approveAgent: (projectId: string, id: string, ok: boolean, prompts?: string[]) =>
+    request<{ ok: true }>(`/api/agent/${projectId}/approve`, json('POST', { id, ok, ...(prompts ? { prompts } : {}) })),
 
   modelInstall: () => request<ModelInstallInfo>('/api/models/install'),
   modelDownloads: () => request<ModelDownloadJob[]>('/api/models/downloads'),

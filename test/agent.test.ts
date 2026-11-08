@@ -1,7 +1,7 @@
 // The canvas assistant end to end with pi's faux model: no API key, no ComfyUI.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -53,7 +53,7 @@ const projects = new ProjectStore();
 const assets = new AssetStore();
 await Promise.all([projects.init(), assets.init()]);
 
-async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; clearAt?: number; commercial?: boolean; approvalMode?: 'always' } = {}) {
+async function hubWith(tasks: ReturnType<typeof fakeTasks>, responses: Step[], opts: { compactAt?: number; clearAt?: number; commercial?: boolean; approvalMode?: 'always' | 'prompts' } = {}) {
   const faux = fauxProvider({ provider: 'faux', models: [{ id: 'faux-1', input: ['text', 'image'], contextWindow: 200_000 }] });
   faux.setResponses(responses);
   const models = createModels();
@@ -429,6 +429,352 @@ test('condensing on request keeps what the user asked for, shows the summary in 
   const texts = view.entries.map((e) => (e.kind === 'event' ? 'event' : e.kind === 'tool' ? e.label : e.text));
   assert.deepEqual(texts.slice(-3), ['event', '出关键帧', '关键帧在出'], 'the last message and its reply stay word for word');
   await assert.rejects(hub.condense(board.id), /对话还很短/);
+});
+
+test('with prompts shown first, an image waits on a card with its prompt, and is generated from the edited one', async () => {
+  const board = await projects.create('prompts');
+  const tasks = fakeTasks();
+  let told = '';
+  const { hub } = await hubWith(
+    tasks,
+    [
+      fauxAssistantMessage(fauxToolCall('generate_image', { prompt: '一只猫坐在窗台上', name: '猫' })),
+      say('提示词在等你确认'),
+      (context) => {
+        told = JSON.stringify(context.messages);
+        return say('好的');
+      },
+    ],
+    { approvalMode: 'prompts' },
+  );
+  await hub.send(board.id, { text: '画只猫' });
+  const card = (await settled(hub, board.id)).entries.find((e) => e.kind === 'tool' && e.status === 'waiting');
+  assert.ok(card?.kind === 'tool' && card.approval?.title === '生成前确认提示词', JSON.stringify(card));
+  assert.deepEqual(card.approval?.prompts, [{ label: '猫', text: '一只猫坐在窗台上', refs: [] }]);
+  assert.equal(tasks.created.length, 0, 'nothing generated before the user agrees');
+
+  await hub.approve(board.id, card.id, true, ['一只橘猫坐在窗台上，傍晚的光']);
+  assert.equal(tasks.created[0]?.op === 'image.generate' && tasks.created[0].prompt, '一只橘猫坐在窗台上，傍晚的光');
+  await hub.send(board.id, { text: '好了吗' });
+  await settled(hub, board.id);
+  assert.match(told, /用户改了 1 条提示词，按改过的生成：.*猫：一只橘猫坐在窗台上，傍晚的光/);
+});
+
+test('with prompts shown first, a video batch card lists every prompt, and edits reach the jobs; reading and writing notes need no card', async () => {
+  const board = await projects.create('video prompts');
+  const frame = (id: string) => ({ id, kind: 'image' as const, x: 0, y: 0, w: 512, h: 288, createdAt: 1, asset: { id: `a${id}`, url: `/files/a${id}.png`, kind: 'image' as const, mime: 'image/png', width: 1376, height: 768 } });
+  await projects.patchItems(board.id, { upsert: [frame('frame0000a1'), frame('frame0000a2')] });
+  const tasks = fakeTasks();
+  const { hub } = await hubWith(
+    tasks,
+    [
+      fauxAssistantMessage([
+        fauxToolCall('write_note', { title: '分镜表', content: 'S01、S02' }),
+        fauxToolCall('batch_generate_videos', {
+          jobs: [
+            { prompt: '她抬头', first_frame_id: 'frame0000a1', name: 'S01' },
+            { prompt: '她转身走开', first_frame_id: 'frame0000a2', name: 'S02' },
+          ],
+        }),
+      ]),
+      say('等你确认'),
+    ],
+    { approvalMode: 'prompts' },
+  );
+  await hub.send(board.id, { text: '做成视频' });
+  const view = await settled(hub, board.id);
+  assert.ok((await projects.get(board.id))!.items.some((i) => i.name === '分镜表'), 'a note is written without asking');
+  const card = view.entries.find((e) => e.kind === 'tool' && e.status === 'waiting');
+  assert.ok(card?.kind === 'tool' && card.tool === 'batch_generate_videos', JSON.stringify(card));
+  assert.deepEqual(
+    card.approval?.prompts?.map((p) => [p.label, p.text, p.refs]),
+    [
+      ['S01', '她抬头', ['frame0000a1']],
+      ['S02', '她转身走开', ['frame0000a2']],
+    ],
+  );
+  await hub.approve(board.id, card.id, true, ['她抬头', '她回头看了一眼，转身走开']);
+  assert.deepEqual(
+    tasks.created.map((r) => r.op === 'video.generate' && r.prompt),
+    ['她抬头', '她回头看了一眼，转身走开'],
+  );
+});
+
+test('what the assistant remembers is in the instructions of every new conversation, and stays put within one', async () => {
+  const board = await projects.create('remember');
+  let same = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    fauxAssistantMessage(fauxToolCall('remember', { changes: [{ action: 'add', scope: 'board', type: 'setting', text: '主角叫林晚，短发' }] })),
+    say('记住了'),
+    (context) => {
+      same = JSON.stringify(context);
+      return say('好');
+    },
+  ]);
+  await hub.send(board.id, { text: '主角叫林晚，短发，记住' });
+  const row = (await settled(hub, board.id)).entries.find((e) => e.kind === 'tool' && e.tool === 'remember');
+  assert.ok(row?.kind === 'tool' && row.summary === '记住了画布记忆「主角叫林晚，短发」', JSON.stringify(row));
+  assert.equal((await hub.memories(board.id)).board.entries[0]?.text, '主角叫林晚，短发');
+  await hub.send(board.id, { text: '继续' });
+  await settled(hub, board.id);
+  assert.doesNotMatch(same, /\[m[\w-]+ · 设定\] 主角叫林晚/, 'the instructions stay as they were, for the cache');
+
+  let fresh = '';
+  const { hub: restarted } = await hubWith(fakeTasks(), [
+    (context) => {
+      fresh = JSON.stringify(context);
+      return say('好');
+    },
+  ]);
+  await restarted.send(board.id, { text: '你好' });
+  await settled(restarted, board.id);
+  assert.match(fresh, /\[m[\w-]+ · 设定\] 主角叫林晚，短发/);
+});
+
+test('an edit in the memory page reaches the assistant with the next message', async () => {
+  const board = await projects.create('memory page');
+  let next = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    say('你好'),
+    (context) => {
+      next = JSON.stringify(context.messages.at(-1));
+      return say('好的');
+    },
+  ]);
+  await hub.send(board.id, { text: '你好' });
+  await settled(hub, board.id);
+  await hub.saveMemory(board.id, 'user', { auto: true, entries: [{ id: '', type: 'preference', text: '不要字幕', at: 0, by: 'user' }] });
+  await hub.send(board.id, { text: '出一段视频' });
+  await settled(hub, board.id);
+  assert.match(next, /用户在记忆页改过记忆，以这一份为准.*不要字幕/);
+  await hub.saveMemory(board.id, 'user', { auto: true, entries: [] });
+});
+
+test('condensing writes down what lasts, notes where the work stands, and the next request reads the new memory', async () => {
+  const board = await projects.create('condense memory');
+  const image = (id: string, name: string) => ({ id, kind: 'image' as const, x: 0, y: 0, w: 512, h: 288, name, group: '关键帧', createdAt: 1, asset: { id: `a${id}`, url: `/files/a${id}.png`, kind: 'image' as const, mime: 'image/png', width: 1376, height: 768 } });
+  await projects.patchItems(board.id, {
+    upsert: [{ id: 'note000001', kind: 'text', x: 0, y: 0, w: 400, h: 300, name: '剧本', text: '第一场：深夜便利店', createdAt: 1 }, image('key0000001', 'S01'), image('key0000002', 'S02')],
+  });
+  let asked = '';
+  let after = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    fauxAssistantMessage(fauxToolCall('read_guide', { name: 'short_drama', section: 'shots' })),
+    say('读完了'),
+    fauxAssistantMessage(fauxToolCall('update_todos', { todos: [{ content: '出关键帧', status: 'completed' }, { content: '出视频', status: 'in_progress' }] })),
+    say('开始出视频'),
+    say('在出了'),
+    (context) => {
+      asked = JSON.stringify(context.messages);
+      return say('## 目标和要求\n- 做一部短剧\n## 下一步\n- 出视频\n<memory_updates>\n[{"action":"add","scope":"board","type":"decision","text":"画风用日系动画","why":"用户否掉了写实"}]\n</memory_updates>');
+    },
+    (context) => {
+      after = JSON.stringify(context);
+      return say('好');
+    },
+  ]);
+  for (const text of ['看看分镜手册', '列个待办', '出视频吧，画风就用日系动画']) {
+    await hub.send(board.id, { text });
+    await settled(hub, board.id);
+  }
+  await hub.condense(board.id);
+  assert.match(asked, /现有记忆/);
+  assert.deepEqual((await hub.memories(board.id)).board.entries.map((e) => [e.type, e.text, e.why]), [['decision', '画风用日系动画', '用户否掉了写实']]);
+
+  const summary = (await hub.view(board.id)).entries.find((e) => e.kind === 'event' && e.detail);
+  const detail = summary?.kind === 'event' ? summary.detail! : '';
+  assert.doesNotMatch(detail, /memory_updates/);
+  assert.match(detail, /整理时的状态：/);
+  assert.match(detail, /待办：✓ 出关键帧；▶ 出视频/);
+  assert.match(detail, /`note000001`「剧本」9 字/);
+  assert.match(detail, /关键帧 2 张（S01、S02）/);
+  assert.match(detail, /short_drama · shots/);
+
+  await hub.send(board.id, { text: '继续' });
+  await settled(hub, board.id);
+  assert.match(after, /\[m[\w-]+ · 决定\] 画风用日系动画（用户否掉了写实）/, 'the instructions after condensing carry the new memory');
+});
+
+test('deleting a board deletes its memory, and leaves the user\'s', async () => {
+  const board = await projects.create('forget');
+  const { hub } = await hubWith(fakeTasks(), []);
+  await hub.saveMemory(board.id, 'board', { auto: true, entries: [{ id: '', type: 'setting', text: '主角叫林晚', at: 0, by: 'user' }] });
+  await hub.saveMemory(board.id, 'user', { auto: true, entries: [{ id: '', type: 'preference', text: '默认 16:9', at: 0, by: 'user' }] });
+  await hub.forget(board.id);
+  const left = await hub.memories(board.id);
+  assert.deepEqual([left.board.entries.length, left.user.entries.length], [0, 1]);
+  await hub.saveMemory(board.id, 'user', { auto: true, entries: [] });
+});
+
+test('the to-do list shows in the panel without a row of its own, rides along with each message, and survives a restart', async () => {
+  const board = await projects.create('todos');
+  const steps = [
+    { content: '写剧本', status: 'completed' },
+    { content: '出关键帧', status: 'in_progress' },
+    { content: '出视频', status: 'pending' },
+  ];
+  let next = '';
+  const { hub, emitted } = await hubWith(fakeTasks(), [
+    fauxAssistantMessage(fauxToolCall('update_todos', { todos: steps })),
+    say('开始做'),
+    (context) => {
+      next = JSON.stringify(context.messages.at(-1));
+      return say('接着做');
+    },
+  ]);
+  await hub.send(board.id, { text: '做一部短剧' });
+  const view = await settled(hub, board.id);
+  assert.deepEqual(view.todos, steps);
+  assert.ok(emitted.some((e) => e.todos?.length === 3), 'the panel hears of it as it happens');
+  assert.ok(!view.entries.some((e) => e.kind === 'tool'), 'no tool row for it');
+  await hub.send(board.id, { text: '继续' });
+  await settled(hub, board.id);
+  assert.match(next, /你的待办（1\/3 完成）：.*- \[x\] 写剧本.*- \[>\] 出关键帧.*- \[ \] 出视频/);
+
+  const { hub: restarted } = await hubWith(fakeTasks(), []);
+  assert.deepEqual((await restarted.view(board.id)).todos, steps);
+  await restarted.clear(board.id);
+  assert.deepEqual((await restarted.view(board.id)).todos, []);
+});
+
+test('a question card waits for a click; the answer goes to the assistant as the user message, and writing past it skips it', async () => {
+  const board = await projects.create('question');
+  const ask = (q: string) => fauxAssistantMessage(fauxToolCall('ask_user', { question: q, options: [{ label: '日系动画' }, { label: '写实', description: '像电影剧照' }] }));
+  let answer = '';
+  const { hub } = await hubWith(fakeTasks(), [
+    ask('画风选哪种？'),
+    say('等你选'),
+    (context) => {
+      answer = JSON.stringify(context.messages.at(-1));
+      return ask('比例呢？');
+    },
+    say('再等你选'),
+    say('好的，用 16:9'),
+  ]);
+  await hub.send(board.id, { text: '做一张海报' });
+  const card = (await settled(hub, board.id)).entries.find((e) => e.kind === 'tool' && e.tool === 'ask_user');
+  assert.ok(card?.kind === 'tool' && card.status === 'waiting' && card.question?.options[1].description === '像电影剧照', JSON.stringify(card));
+
+  await hub.answer(board.id, card.id, '写实');
+  const view = await settled(hub, board.id);
+  assert.match(answer, /回答「画风选哪种？」：写实/);
+  const first = view.entries.find((e) => e.id === card.id);
+  assert.ok(first?.kind === 'tool' && first.status === 'done' && first.question?.state === 'answered' && first.summary === '已回答：写实', JSON.stringify(first));
+  await assert.rejects(hub.answer(board.id, card.id, '日系动画'), /已经回答过了/);
+
+  // The second question is left open, and the user writes something else.
+  const second = view.entries.findLast((e) => e.kind === 'tool' && e.tool === 'ask_user')!;
+  await hub.send(board.id, { text: '就用 16:9 吧' });
+  const after = (await settled(hub, board.id)).entries.find((e) => e.id === second.id);
+  assert.ok(after?.kind === 'tool' && after.question?.state === 'skipped' && after.summary === '没有回答', JSON.stringify(after));
+});
+
+test('plan mode lets the assistant read but not change the board, until the user accepts its plan', async () => {
+  const board = await projects.create('plan');
+  let told = '';
+  let woken = '';
+  const { hub, emitted } = await hubWith(fakeTasks(), [
+    (context) => {
+      told = JSON.stringify(context.messages.at(-1));
+      return fauxAssistantMessage([fauxToolCall('read_board', {}), fauxToolCall('write_note', { title: '剧本', content: '先写了再说' })]);
+    },
+    fauxAssistantMessage(fauxToolCall('present_plan', { plan: '## 方案\n1. 写剧本\n2. 出三张关键帧' })),
+    say('方案在等你确认'),
+    (context) => {
+      woken = JSON.stringify(context.messages.at(-1));
+      return say('开始写剧本');
+    },
+  ]);
+  await hub.setPlan(board.id, true);
+  assert.ok(emitted.some((e) => e.plan === true));
+  await hub.send(board.id, { text: '做一部短剧' });
+  const view = await settled(hub, board.id);
+  assert.match(told, /现在是计划模式/);
+  const tools = view.entries.filter((e) => e.kind === 'tool');
+  assert.deepEqual(
+    tools.map((e) => e.kind === 'tool' && [e.tool, e.status]),
+    [
+      ['read_board', 'done'],
+      ['write_note', 'error'],
+      ['present_plan', 'waiting'],
+    ],
+  );
+  assert.equal((await projects.get(board.id))!.items.length, 0, 'nothing written in plan mode');
+  const card = tools[2];
+  assert.ok(card.kind === 'tool' && card.approval?.body?.includes('出三张关键帧') && card.approval.confirm === '按这个做' && card.approval.reject === '再改改', JSON.stringify(card));
+
+  await hub.approve(board.id, card.id, true);
+  const done = await settled(hub, board.id);
+  assert.equal(done.plan, false);
+  assert.match(woken, /用户确认了方案，计划模式已关闭/);
+});
+
+test('going back to a message restores the board and the conversation, cancels work started since, and can itself be undone', async () => {
+  const board = await projects.create('rewind');
+  const tasks = fakeTasks();
+  const cancelled: string[] = [];
+  tasks.cancel = async (id: string) => {
+    cancelled.push(id);
+    return tasks.records.get(id);
+  };
+  const { hub } = await hubWith(tasks, [
+    fauxAssistantMessage(fauxToolCall('write_note', { title: '剧本', content: '第一场' })),
+    say('剧本写好了'),
+    fauxAssistantMessage([fauxToolCall('write_note', { title: '分镜表', content: 'S01' }), fauxToolCall('generate_image', { prompt: '一只猫' })]),
+    say('分镜表写好了，猫在画'),
+  ]);
+  await hub.send(board.id, { text: '写剧本' });
+  await settled(hub, board.id);
+  await hub.send(board.id, { text: '写分镜表，再画只猫' });
+  const view = await settled(hub, board.id);
+  assert.equal((await projects.get(board.id))!.items.length, 3);
+  const users = view.entries.filter((e) => e.kind === 'user');
+  assert.ok(users.every((e) => e.kind === 'user' && e.rewind));
+
+  const { text } = await hub.rewind(board.id, users[1].id);
+  assert.equal(text, '写分镜表，再画只猫');
+  assert.deepEqual((await projects.get(board.id))!.items.map((i) => i.name), ['剧本']);
+  assert.equal(tasks.created.length, 1);
+  assert.deepEqual(cancelled, [...tasks.records.keys()], 'the cat, still queued');
+  const back = await hub.view(board.id);
+  assert.deepEqual(back.entries.map((e) => (e.kind === 'tool' ? e.tool : e.kind === 'user' || e.kind === 'assistant' ? e.text : e.kind)), ['写剧本', 'write_note', '剧本写好了']);
+  assert.ok((await projects.listSnapshots(board.id)).some((s) => s.name === '回退对话之前'), 'the board before going back is kept');
+  await assert.rejects(hub.rewind(board.id, users[1].id), /回不到这条消息了/);
+});
+
+test('the panel learns how full the context is, unknown again right after condensing', async () => {
+  const board = await projects.create('context');
+  const { hub } = await hubWith(fakeTasks(), [say('一'), say('二'), say('三'), say('## 目标和要求\n- 无')], { compactAt: 50_000 });
+  for (const text of ['第一句', '第二句', '第三句']) {
+    await hub.send(board.id, { text });
+    await settled(hub, board.id);
+  }
+  const { context } = await hub.view(board.id);
+  assert.ok(context && context.used > 0 && context.limit === 50_000, JSON.stringify(context));
+  await hub.condense(board.id);
+  assert.equal((await hub.view(board.id)).context, null);
+});
+
+test('saved commands keep clear of the built-ins and of each other, and come back as saved', async () => {
+  const { hub } = await hubWith(fakeTasks(), []);
+  await assert.rejects(hub.saveCommands([{ name: '计划', prompt: 'x' }]), /内置命令/);
+  await assert.rejects(hub.saveCommands([{ name: 'Plan', prompt: 'x' }]), /内置命令/);
+  await assert.rejects(hub.saveCommands([{ name: '短 剧', prompt: 'x' }]), /不能有空格/);
+  await assert.rejects(hub.saveCommands([{ name: '短剧', prompt: 'a' }, { name: '短剧', prompt: 'b' }]), /有两个命令/);
+  await assert.rejects(hub.saveCommands([{ name: '短剧', prompt: '  ' }]), /内容是空的/);
+  await assert.rejects(hub.saveCommands({ name: '短剧' }), /格式错误/);
+  const saved = await hub.saveCommands([{ name: '/短剧', prompt: ' 做一部短剧：{输入} ' }]);
+  assert.deepEqual(saved, [{ name: '短剧', prompt: '做一部短剧：{输入}' }]);
+  assert.deepEqual(await hub.commands(), saved);
+});
+
+test('checkpoints for going back stay out of the snapshot list, and only the latest forty are kept', async () => {
+  const board = await projects.create('checkpoints');
+  await projects.createSnapshot(board.id, '用户存的');
+  for (let i = 0; i < 42; i++) await projects.createSnapshot(board.id, 'checkpoint', { checkpoint: true });
+  assert.deepEqual((await projects.listSnapshots(board.id)).map((s) => s.name), ['用户存的']);
+  const files = readdirSync(join(process.env.DATA_DIR!, 'snapshots', board.id));
+  assert.equal(files.length, 41);
 });
 
 test('an OpenAI-compatible endpoint takes its context length and reasoning from the settings', () => {

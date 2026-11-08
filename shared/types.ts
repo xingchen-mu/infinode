@@ -305,6 +305,13 @@ export interface PresetInfo extends Omit<CustomWorkflow, 'graph'> {
   missing: { nodes: string[]; models: ModelDownload[]; notes: string[] };
 }
 
+/**
+ * What the assistant asks before doing: `risky`, only costly or destructive work (video batches, deleting);
+ * `prompts`, also every generation, showing its prompts to read and edit first; `always`, every write.
+ */
+export type ApprovalMode = 'risky' | 'prompts' | 'always';
+export const APPROVAL_MODES: ApprovalMode[] = ['risky', 'prompts', 'always'];
+
 export interface Settings {
   comfyUrl: string;
   /** Only models whose license allows commercial use (see shared/licenses.ts); the rest are switched off. */
@@ -320,8 +327,8 @@ export interface Settings {
   agentContextWindow?: number;
   /** For an OpenAI-compatible endpoint: the model reasons, so agentThinking is sent to it. */
   agentReasoning?: boolean;
-  /** Whether the assistant asks before every write operation. */
-  agentApprovalMode?: 'risky' | 'always';
+  /** What the assistant asks the user before doing (see ApprovalMode). */
+  agentApprovalMode?: ApprovalMode;
   agentApiKeyConfigured?: boolean;
   /** Where model downloads come from (see ModelSource). */
   modelSource?: ModelSource;
@@ -403,6 +410,8 @@ export type AgentEntry =
       text: string;
       /** Board items selected when the message was sent. */
       selection?: string[];
+      /** Board and conversation can go back to just before this message. */
+      rewind?: boolean;
       at: number;
     }
   | { kind: 'assistant'; id: string; text: string; error?: string; at: number }
@@ -417,14 +426,88 @@ export type AgentEntry =
       /** `waiting`: held until the user approves it in the panel (`approval`). */
       status: 'running' | 'done' | 'error' | 'waiting';
       /** `frames`: first frames of the work held (video batches), shown on the card; `since`: when it was made. */
-      /** `confirm`: the button's label, when not 开始. */
-      approval?: { title: string; detail: string; frames?: string[]; since?: number; confirm?: string };
+      /**
+       * `confirm` / `reject`: the buttons' labels, when not 开始 / 不要; `body`: Markdown shown on the card (a plan);
+       * `prompts`: what the work would generate from, for the user to read and edit before it is submitted.
+       */
+      approval?: { title: string; detail: string; frames?: string[]; since?: number; confirm?: string; reject?: string; body?: string; prompts?: AgentPrompt[] };
+      /** A question with options for the user to pick (status `waiting` until answered). */
+      question?: AgentQuestion;
       /** One line on what the call is doing or did (or its error). */
       summary: string;
       /** Board items it made or looked at. */
       items?: string[];
       at: number;
     };
+
+/** A prompt shown before it is generated from: `label` names the job (a shot), `refs` are its input items. */
+export interface AgentPrompt {
+  label: string;
+  text: string;
+  refs?: string[];
+}
+
+/** A step of the assistant's to-do list for a long task. */
+export interface AgentTodo {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+/** What the assistant asked, with options to click; `skipped`: the user wrote something else instead. */
+export interface AgentQuestion {
+  text: string;
+  options: { label: string; description?: string }[];
+  /** More than one option may be picked. */
+  multiple?: boolean;
+  state: 'pending' | 'answered' | 'skipped';
+  answer?: string;
+}
+
+/** How full the context was at the last request, against the size at which it is condensed. */
+export interface AgentContext {
+  used: number;
+  limit: number;
+}
+
+/** `board`: this board only; `user`: every board (the user's own preferences). */
+export type MemoryScope = 'board' | 'user';
+/** setting: characters, style, world; decision: what was settled (and turned down, with why); preference; feedback: a correction. */
+export type MemoryType = 'setting' | 'decision' | 'preference' | 'feedback';
+
+/** Characters of all entries of a scope together: memory stays a small part of every request. */
+export const MEMORY_LIMIT: Record<MemoryScope, number> = { board: 2000, user: 1000 };
+/** Characters of one entry, its reason included. */
+export const ENTRY_CHARS = 300;
+export const MEMORY_TYPES: Record<MemoryScope, MemoryType[]> = { board: ['setting', 'decision', 'preference'], user: ['preference', 'feedback'] };
+
+/** One thing the assistant remembers across conversations. */
+export interface MemoryEntry {
+  id: string;
+  type: MemoryType;
+  text: string;
+  /** Why it holds, when that matters (a turned-down option's reason, the occasion of a correction). */
+  why?: string;
+  at: number;
+  /** Written by the assistant (while working or condensing) or by the user in the memory page. */
+  by: 'assistant' | 'user';
+}
+
+/** One scope's memory; `auto`: the assistant may write to it on its own. */
+export interface AgentMemory {
+  auto: boolean;
+  entries: MemoryEntry[];
+}
+
+export interface AgentMemories {
+  board: AgentMemory;
+  user: AgentMemory;
+}
+
+/** A saved prompt the user runs as /name in the assistant's input. */
+export interface AgentCommand {
+  name: string;
+  prompt: string;
+}
 
 export interface AgentStatus {
   /** False until a model is usable (e.g. its API key is missing); `reason` says what to do. */
@@ -446,6 +529,11 @@ export interface AgentView {
   entries: AgentEntry[];
   running: boolean;
   usage: AgentUsage;
+  todos: AgentTodo[];
+  /** Plan mode: the assistant only reads and proposes until the user accepts its plan. */
+  plan: boolean;
+  /** Unknown until the first request (and right after condensing). */
+  context: AgentContext | null;
 }
 
 /** Sent over /api/events as `agent`. */
@@ -455,6 +543,9 @@ export interface AgentEventData {
   entry?: AgentEntry;
   running?: boolean;
   usage?: AgentUsage;
+  todos?: AgentTodo[];
+  plan?: boolean;
+  context?: AgentContext | null;
   /** The conversation was cleared. */
   reset?: boolean;
 }

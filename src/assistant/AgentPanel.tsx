@@ -1,8 +1,9 @@
-import { ArrowUp, Bell, CircleAlert, CircleCheck, FoldVertical, Hourglass, Loader2, Sparkles, Square, SquarePen, StickyNote, X } from 'lucide-react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowUp, Bell, Brain, CircleAlert, CircleCheck, ClipboardList, FoldVertical, Hourglass, Loader2, RotateCcw, Sparkles, Square, SquarePen, StickyNote, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { thumbUrl } from '../../shared/media';
-import type { AgentEntry, AgentEventData, AgentStatus, AgentUsage } from '../../shared/types';
+import type { AgentCommand, AgentContext, AgentEntry, AgentEventData, AgentQuestion, AgentStatus, AgentTodo, AgentUsage } from '../../shared/types';
+import { builtinCommand, expandCommand, parseCommand } from '../../shared/commands';
 import { ensureVisible, revealItems } from '../canvas/view';
 import { api } from '../lib/api';
 import { boundsOf, viewportCenter } from '../../shared/geometry';
@@ -11,6 +12,10 @@ import { savePending } from '../projects/sync';
 import { select, toast, useStore } from '../store';
 import { Markdown } from '../components/Markdown';
 import { lang, t } from '../i18n';
+import { CommandsModal, SlashMenu, type SlashItem, slashItems } from './Commands';
+import { MemoryModal } from './Memory';
+import { QuestionCard } from './Question';
+import { Todos } from './Todos';
 
 const OPEN_KEY = 'infinode:agent';
 
@@ -28,6 +33,14 @@ interface AgentState {
   running: boolean;
   usage: AgentUsage;
   draft: string;
+  todos: AgentTodo[];
+  /** Plan mode: the assistant reads and proposes until a plan is accepted. */
+  plan: boolean;
+  context: AgentContext | null;
+  /** The user's saved /commands. */
+  commands: AgentCommand[];
+  /** The "condense now" bar: what to keep in particular, and whether it is running. */
+  condense: { focus: string; busy: boolean } | null;
 }
 
 export const useAgent = create<AgentState>(() => ({
@@ -38,6 +51,11 @@ export const useAgent = create<AgentState>(() => ({
   running: false,
   usage: { tokens: 0, cost: 0 },
   draft: '',
+  todos: [],
+  plan: false,
+  context: null,
+  commands: [],
+  condense: null,
 }));
 
 function markOpen(open: boolean) {
@@ -59,9 +77,26 @@ export async function refreshAgent() {
   try {
     const [status, view] = await Promise.all([api.agentStatus(), api.agent(projectId)]);
     if (useStore.getState().projectId !== projectId) return;
-    useAgent.setState({ status, projectId, entries: view.entries, running: view.running, usage: view.usage });
+    useAgent.setState({ status, projectId, entries: view.entries, running: view.running, usage: view.usage, todos: view.todos, plan: view.plan, context: view.context });
   } catch (err) {
-    useAgent.setState({ status: { ready: false, model: '', vision: false, reason: (err as Error).message }, projectId, entries: [], running: false, usage: { tokens: 0, cost: 0 } });
+    useAgent.setState({
+      status: { ready: false, model: '', vision: false, reason: (err as Error).message },
+      projectId,
+      entries: [],
+      running: false,
+      usage: { tokens: 0, cost: 0 },
+      todos: [],
+      plan: false,
+      context: null,
+    });
+  }
+}
+
+export async function loadCommands() {
+  try {
+    useAgent.setState({ commands: await api.agentCommands() });
+  } catch {
+    /* server offline */
   }
 }
 
@@ -69,12 +104,15 @@ export function onAgentEvent(e: AgentEventData) {
   const s = useAgent.getState();
   if (e.projectId !== s.projectId) return;
   if (e.reset) {
-    useAgent.setState({ entries: [], running: false, usage: { tokens: 0, cost: 0 } });
+    useAgent.setState({ entries: [], running: false, usage: { tokens: 0, cost: 0 }, todos: [], plan: false, context: null });
     return;
   }
   const patch: Partial<AgentState> = {};
   if (e.running !== undefined) patch.running = e.running;
   if (e.usage) patch.usage = e.usage;
+  if (e.todos) patch.todos = e.todos;
+  if (e.plan !== undefined) patch.plan = e.plan;
+  if (e.context !== undefined) patch.context = e.context;
   const entry = e.entry;
   if (entry) {
     const i = s.entries.findIndex((x) => x.id === entry.id);
@@ -85,8 +123,28 @@ export function onAgentEvent(e: AgentEventData) {
 }
 
 
+/** Sends the input, running it first when it is a /command. */
 async function send() {
-  const text = useAgent.getState().draft.trim();
+  const { draft, commands, plan } = useAgent.getState();
+  const text = draft.trim();
+  const command = parseCommand(text);
+  if (command) {
+    const builtin = builtinCommand(command.name);
+    if (builtin) {
+      useAgent.setState({ draft: '' });
+      if (builtin === 'new') return clear();
+      if (builtin === 'condense') return condenseNow(command.rest);
+      // /plan alone switches it; with words after it, switches it on and sends them.
+      await setPlan(command.rest ? true : !plan);
+      return command.rest ? sendText(command.rest) : undefined;
+    }
+    const own = commands.find((c) => c.name.toLowerCase() === command.name.toLowerCase());
+    if (own) return sendText(expandCommand(own, command.rest));
+  }
+  return sendText(text);
+}
+
+async function sendText(text: string) {
   const { projectId, selection, viewport, screen } = useStore.getState();
   if (!text || !projectId) return;
   useAgent.setState({ draft: '' });
@@ -109,6 +167,58 @@ async function clear() {
   const { projectId, running } = useAgent.getState();
   if (!projectId || !confirm(running ? t('助手还在工作，停止并清空这段对话？') : t('清空这段对话？画布上的内容不受影响。'))) return;
   await api.clearAgent(projectId).catch((err) => toast((err as Error).message, 'error'));
+}
+
+async function setPlan(on: boolean) {
+  const { projectId } = useAgent.getState();
+  if (!projectId) return;
+  try {
+    await api.setAgentPlan(projectId, on);
+    useAgent.setState({ plan: on });
+    toast(on ? t('计划模式：助手只读画布、出方案，你确认后才动手') : t('已退出计划模式'), 'info');
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  }
+}
+
+/** Condenses the earlier conversation now, keeping `focus` in particular. */
+async function condenseNow(focus: string) {
+  const { projectId } = useAgent.getState();
+  if (!projectId) return;
+  useAgent.setState({ condense: { focus, busy: true } });
+  try {
+    await api.condenseAgent(projectId, focus);
+    await refreshAgent();
+    useAgent.setState({ condense: null });
+  } catch (err) {
+    toast((err as Error).message, 'error');
+    useAgent.setState((s) => ({ condense: s.condense ? { ...s.condense, busy: false } : null }));
+  }
+}
+
+/** Board and conversation back to just before a message, which comes back into the input to edit. */
+async function rewind(id: string) {
+  const { projectId } = useAgent.getState();
+  if (!projectId) return;
+  if (!confirm(t('回到发这条消息之前？画布和对话都会恢复到那时：之后的改动都会撤掉（包括你自己做的），还在生成的任务会取消，花掉的费用不会退。现在的画布会先存一个快照，后悔了可以在「项目快照」里恢复。'))) return;
+  try {
+    const { text } = await api.rewindAgent(projectId, id);
+    await refreshAgent();
+    useAgent.setState({ draft: text });
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  }
+}
+
+async function answerQuestion(id: string, answer: string) {
+  const { projectId } = useAgent.getState();
+  if (!projectId) return;
+  try {
+    await savePending();
+    await api.answerAgent(projectId, id, answer);
+  } catch (err) {
+    toast((err as Error).message, 'error');
+  }
 }
 
 function focusItems(ids: string[]) {
@@ -154,10 +264,18 @@ function Chips({ ids }: { ids: string[] }) {
 }
 
 function Entry({ entry }: { entry: AgentEntry }) {
+  const running = useAgent((s) => s.running);
   if (entry.kind === 'user') {
     return (
       <div className="agent-msg user">
-        <div className="agent-bubble">{entry.text}</div>
+        <div className="agent-bubble-row">
+          {entry.rewind && (
+            <button className="icon-btn small agent-rewind" disabled={running} title={t('回到这里：画布和对话都恢复到发这条消息之前，消息回到输入框里可以改了再发')} onClick={() => void rewind(entry.id)}>
+              <RotateCcw />
+            </button>
+          )}
+          <div className="agent-bubble">{entry.text}</div>
+        </div>
         {entry.selection && <Chips ids={entry.selection} />}
       </div>
     );
@@ -211,6 +329,7 @@ function Entry({ entry }: { entry: AgentEntry }) {
         </div>
         {entry.items && <Chips ids={entry.items} />}
         {entry.status === 'waiting' && entry.approval && <Approval id={entry.id} approval={entry.approval} />}
+        {entry.question && <QuestionCard question={entry.question as AgentQuestion} onAnswer={(answer) => answerQuestion(entry.id, answer)} />}
       </div>
     </div>
   );
@@ -219,6 +338,8 @@ function Entry({ entry }: { entry: AgentEntry }) {
 /** Work the agent holds until the user agrees, e.g. a batch of long video generations. */
 function Approval({ id, approval }: { id: string; approval: NonNullable<Extract<AgentEntry, { kind: 'tool' }>['approval']> }) {
   const [busy, setBusy] = useState(false);
+  // The prompts as the user is editing them.
+  const [prompts, setPrompts] = useState(() => approval.prompts?.map((p) => p.text) ?? []);
   const items = useStore((s) => s.items);
   // What will be submitted: a keyframe redone after the card was made replaces its old version.
   const frames = approval.frames?.map((id) => {
@@ -231,7 +352,7 @@ function Approval({ id, approval }: { id: string; approval: NonNullable<Extract<
     if (!projectId) return;
     setBusy(true);
     try {
-      await api.approveAgent(projectId, id, ok);
+      await api.approveAgent(projectId, id, ok, ok && approval.prompts ? prompts : undefined);
     } catch (err) {
       toast((err as Error).message, 'error');
       setBusy(false);
@@ -240,12 +361,28 @@ function Approval({ id, approval }: { id: string; approval: NonNullable<Extract<
   return (
     <div className="agent-approval">
       <b>{approval.title}</b>
-      <span>{approval.detail}</span>
+      {approval.detail && <span>{approval.detail}</span>}
+      {approval.body && <Markdown text={approval.body} className="agent-text agent-plan" />}
+      {approval.prompts?.map((p, i) => (
+        <div key={i} className="agent-prompt">
+          <div className="agent-prompt-head">
+            <b>{p.label || t('第 {n} 条', { n: i + 1 })}</b>
+            {prompts[i] !== p.text && <span className="agent-prompt-edited">{t('已修改')}</span>}
+          </div>
+          {p.refs && p.refs.length > 0 && <Chips ids={p.refs} />}
+          <textarea
+            value={prompts[i] ?? ''}
+            disabled={busy}
+            rows={Math.min(10, Math.max(3, Math.ceil((prompts[i] ?? '').length / 48)))}
+            onChange={(e) => setPrompts((all) => all.map((x, j) => (j === i ? e.target.value : x)))}
+          />
+        </div>
+      ))}
       {frames && <Chips ids={frames} />}
       {redone > 0 && <span>{t('{n} 段的首帧用的是确认卡之后重做的版本', { n: redone })}</span>}
       <div className="agent-approval-bar">
         <button className="btn ghost small" disabled={busy} onClick={() => void answer(false)}>
-          {t('不要')}
+          {approval.reject ?? t('不要')}
         </button>
         <button className="btn primary small" disabled={busy} onClick={() => void answer(true)}>
           {approval.confirm ?? t('开始')}
@@ -279,30 +416,22 @@ function usageText(u: AgentUsage): string {
 }
 
 export function AgentPanel() {
-  const { open, status, entries, running, usage, draft } = useAgent();
+  const { open, status, entries, running, usage, draft, todos, plan, context, commands, condense } = useAgent();
   const projectId = useStore((s) => s.projectId);
   const selected = useStore((s) => s.selection.length);
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  /** The "condense now" bar: what to keep in particular, and whether it is running. */
-  const [condense, setCondense] = useState<{ focus: string; busy: boolean } | null>(null);
+  const [active, setActive] = useState(0);
+  const [managing, setManaging] = useState(false);
+  const [remembering, setRemembering] = useState(false);
 
   useEffect(() => {
     if (open && projectId) void refreshAgent();
   }, [open, projectId]);
 
-  const runCondense = async () => {
-    if (!projectId || !condense || condense.busy) return;
-    setCondense({ ...condense, busy: true });
-    try {
-      await api.condenseAgent(projectId, condense.focus);
-      await refreshAgent();
-      setCondense(null);
-    } catch (err) {
-      toast((err as Error).message, 'error');
-      setCondense((c) => (c ? { ...c, busy: false } : c));
-    }
-  };
+  useEffect(() => {
+    if (open) void loadCommands();
+  }, [open]);
 
   // Follow the conversation unless the user scrolled up to read.
   useLayoutEffect(() => {
@@ -310,17 +439,32 @@ export function AgentPanel() {
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [entries, running, open]);
 
+  const closeMemory = useCallback(() => setRemembering(false), []);
+  const slash = slashItems(draft, commands);
+  useEffect(() => setActive(0), [draft]);
+
   if (!open) return null;
   const last = entries[entries.length - 1];
   const thinking = running && (!last || last.kind === 'user' || last.kind === 'event' || (last.kind === 'tool' && last.status !== 'running'));
   const ready = Boolean(status?.ready);
+  const full = context ? Math.min(100, Math.round((context.used / context.limit) * 100)) : 0;
+
+  /** A command picked from the menu: run when it was typed out in full, else fill it in. */
+  const pick = (item: SlashItem) => {
+    if (draft.trim().toLowerCase() === `/${item.name.toLowerCase()}`) return void send();
+    useAgent.setState({ draft: `/${item.name} ` });
+  };
 
   return (
     <div className="agent-panel" data-ui>
       <div className="agent-head">
         <Sparkles className="agent-logo" />
         <span className="agent-title">{t('画布助手')}</span>
-        {status?.model && <span className="agent-model">{status.model.split('/').pop()}</span>}
+        {status?.model && (
+          <span className="agent-model" title={status.model}>
+            {status.model.split('/').pop()}
+          </span>
+        )}
         <span className="agent-head-gap" />
         {usage.tokens > 0 && (
           <span
@@ -334,10 +478,13 @@ export function AgentPanel() {
             {usageText(usage)}
           </span>
         )}
+        <button className="icon-btn small" title={t('记忆：助手跨对话记住的偏好和决定')} onClick={() => setRemembering(true)} disabled={!projectId}>
+          <Brain />
+        </button>
         <button
           className="icon-btn small"
           title={t('整理对话：把较早的部分整理成摘要，后面每次请求都更省')}
-          onClick={() => setCondense({ focus: '', busy: false })}
+          onClick={() => useAgent.setState({ condense: { focus: '', busy: false } })}
           disabled={!ready || running || entries.length < 4 || condense !== null}
         >
           <FoldVertical />
@@ -349,6 +496,8 @@ export function AgentPanel() {
           <X />
         </button>
       </div>
+
+      <Todos todos={todos} />
 
       <div
         className="agent-log"
@@ -368,6 +517,7 @@ export function AgentPanel() {
                 {s}
               </button>
             ))}
+            <p className="agent-empty-tip">{t('打 / 可以用命令，比如 /计划')}</p>
           </div>
         )}
         {entries.map((e) => (
@@ -394,36 +544,71 @@ export function AgentPanel() {
             disabled={condense.busy}
             maxLength={500}
             placeholder={t('整理较早的对话：重点保留什么（可以不填）')}
-            onChange={(e) => setCondense({ ...condense, focus: e.target.value })}
+            onChange={(e) => useAgent.setState({ condense: { ...condense, focus: e.target.value } })}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void runCondense();
-              else if (e.key === 'Escape' && !condense.busy) setCondense(null);
+              if (e.key === 'Enter' && !e.nativeEvent.isComposing) void condenseNow(condense.focus);
+              else if (e.key === 'Escape' && !condense.busy) useAgent.setState({ condense: null });
             }}
           />
-          <button className="btn ghost small" disabled={condense.busy} onClick={() => setCondense(null)}>
+          <button className="btn ghost small" disabled={condense.busy} onClick={() => useAgent.setState({ condense: null })}>
             {t('取消')}
           </button>
-          <button className="btn primary small" disabled={condense.busy} onClick={() => void runCondense()}>
+          <button className="btn primary small" disabled={condense.busy} onClick={() => void condenseNow(condense.focus)}>
             {condense.busy && <Loader2 className="spin" />} {t('整理')}
           </button>
         </div>
       )}
 
-      <div className="agent-input">
+      <div className={`agent-input ${plan ? 'plan' : ''}`}>
+        {slash && <SlashMenu items={slash} active={active} onPick={pick} onHover={setActive} onManage={() => setManaging(true)} />}
         <textarea
           value={draft}
           rows={3}
           disabled={!ready}
-          placeholder={selected ? t('会带上选中的 {n} 个节点', { n: selected }) : t('想让助手做什么？')}
+          placeholder={
+            plan
+              ? t('计划模式：助手只读画布、出方案，你确认后才动手')
+              : selected
+                ? t('会带上选中的 {n} 个节点', { n: selected })
+                : t('想让助手做什么？打 / 用命令')
+          }
           onChange={(e) => useAgent.setState({ draft: e.target.value })}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.nativeEvent.isComposing) return;
+            if (slash?.length && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+              e.preventDefault();
+              setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : slash.length - 1)) % slash.length);
+            } else if (slash?.length && (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey))) {
+              e.preventDefault();
+              pick(slash[Math.min(active, slash.length - 1)]);
+            } else if (slash && e.key === 'Escape') {
+              useAgent.setState({ draft: '' });
+            } else if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void send();
             }
           }}
         />
         <div className="agent-input-bar">
+          <button
+            className={`agent-plan-toggle ${plan ? 'on' : ''}`}
+            disabled={!ready || !projectId}
+            title={t('计划模式：助手先只读画布、写出方案给你确认，确认后才出图、改画布')}
+            onClick={() => void setPlan(!plan)}
+          >
+            <ClipboardList /> {t('计划模式')}
+          </button>
+          {context && (
+            <span
+              className={`agent-context ${full >= 80 ? 'full' : ''}`}
+              title={t('上下文用了 {used} tokens。到 {limit} 时会把较早的对话整理成摘要，用到一半时会先清掉旧的工具结果', {
+                used: compact.format(context.used),
+                limit: compact.format(context.limit),
+              })}
+            >
+              {t('上下文 {n}%', { n: full })}
+            </span>
+          )}
           <span className="agent-hint">{running ? t('工作中，可以继续补充要求') : t('Enter 发送 · Shift+Enter 换行')}</span>
           {running && (
             <button className="btn ghost small" onClick={() => void stop()}>
@@ -435,6 +620,9 @@ export function AgentPanel() {
           </button>
         </div>
       </div>
+
+      {remembering && projectId && <MemoryModal projectId={projectId} onClose={closeMemory} />}
+      {managing && <CommandsModal onClose={() => setManaging(false)} onSaved={(list) => useAgent.setState({ commands: list })} />}
     </div>
   );
 }

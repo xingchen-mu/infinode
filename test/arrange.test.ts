@@ -178,3 +178,11 @@ test('save_snapshot keeps the board under the name given, as a snapshot the user
   assert.deepEqual(snapshots, [{ name: '第一版关键帧', auto: false, ids: ['a'] }]);
   assert.match(out.text, /项目快照/);
 });
+
+test('the to-do list, questions and plans belong to the panel: outside agents have their own', () => {
+  const names = (host: 'panel' | 'mcp') => canvasTools({} as Parameters<typeof canvasTools>[0], {} as Parameters<typeof canvasTools>[1], host).map((t) => t.name);
+  for (const name of ['update_todos', 'ask_user', 'present_plan']) {
+    assert.ok(names('panel').includes(name), name);
+    assert.ok(!names('mcp').includes(name), name);
+  }
+});

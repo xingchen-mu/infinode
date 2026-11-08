@@ -211,9 +211,11 @@ test('feature routes preserve HTTP behavior and existing data paths', { timeout:
       agentThinking: 'medium',
       agentContextWindow: 32768,
       agentReasoning: true,
+      agentApprovalMode: 'prompts',
     });
     assert.equal(customSettings.status, 200);
     const publicSettings = await (await request('/api/settings')).json();
+    assert.equal(publicSettings.agentApprovalMode, 'prompts');
     assert.equal(publicSettings.agentModel, 'local-chat');
     assert.equal(publicSettings.agentContextWindow, 32768);
     assert.equal(publicSettings.agentReasoning, true);
