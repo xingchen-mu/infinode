@@ -87,6 +87,17 @@ async function settled(hub: InstanceType<typeof AgentHub>, projectId: string) {
   throw new Error('the run did not settle');
 }
 
+/** The conversation file once `ready` holds of its text: a run's last save lands just after it reports done. */
+async function savedConversation(projectId: string, ready: (text: string) => boolean) {
+  const file = join(process.env.DATA_DIR!, 'agent', `${projectId}.json`);
+  for (let i = 0; i < 150; i++) {
+    const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    if (text && ready(text)) return JSON.parse(text);
+    await sleep(20);
+  }
+  throw new Error('the conversation was not saved');
+}
+
 const say = (text: string, input = 100): AssistantMessage => ({
   ...fauxAssistantMessage(text),
   usage: { input, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: input + 20, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.001 } },
@@ -254,7 +265,7 @@ test('the token count leaves out cache reads, also for a conversation saved befo
   }
   // The faux model reports its own usage, cache reads included: the count takes all but those.
   const file = join(process.env.DATA_DIR!, 'agent', `${board.id}.json`);
-  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  const saved = await savedConversation(board.id, (text) => text.includes('还在'));
   const usages = saved.messages.filter((m: AssistantMessage) => m.role === 'assistant').map((m: AssistantMessage) => m.usage);
   const paid = usages.reduce((n: number, u: AssistantMessage['usage']) => n + u.input + u.output + u.cacheWrite, 0);
   assert.ok(usages.some((u: AssistantMessage['usage']) => u.cacheRead > 0), 'the second request reads the first from the cache');
@@ -308,7 +319,7 @@ test('a long conversation is condensed into a summary, and the panel keeps the e
   assert.ok(texts.includes('回答 1'), 'old rows stay in the panel');
   assert.ok(texts.some((t) => t.includes('摘要')), texts.join(' | '));
   assert.equal(texts.at(-1), '回答 7');
-  const saved = JSON.parse(readFileSync(join(process.env.DATA_DIR!, 'agent', `${board.id}.json`), 'utf8'));
+  const saved = await savedConversation(board.id, (text) => text.includes('回答 7'));
   assert.match(saved.messages[0].content, /^<canvas_summary>/);
   assert.ok(saved.messages.length < 14, `transcript shrank to ${saved.messages.length}`);
 });
@@ -336,7 +347,7 @@ test('condensing keeps what the user typed word for word, also through a second 
     await hub.send(board.id, { text: `第 ${i} 句：主角叫林晚` });
     await settled(hub, board.id);
   }
-  const saved = JSON.parse(readFileSync(join(process.env.DATA_DIR!, 'agent', `${board.id}.json`), 'utf8'));
+  const saved = await savedConversation(board.id, (text) => text.includes('回答 9'));
   const summary: string = saved.messages[0].content;
   assert.match(summary, /^<canvas_summary>\n- 第二次整理/);
   for (const i of [1, 2, 3, 4]) assert.ok(summary.includes(`<said>第 ${i} 句：主角叫林晚</said>`), summary);
